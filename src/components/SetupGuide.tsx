@@ -5,11 +5,34 @@ interface SetupGuideProps {
 }
 
 export default function SetupGuide({ onBack }: SetupGuideProps) {
-  const [activeTab, setActiveTab] = useState<'quick' | 'advanced' | 'server'>('quick');
+  const [activeStep, setActiveStep] = useState(0);
+
+  const steps = [
+    {
+      title: 'Открой сайт на ПК',
+      icon: '💻',
+      color: 'from-blue-500 to-cyan-500',
+    },
+    {
+      title: 'Создай комнату',
+      icon: '🏠',
+      color: 'from-indigo-500 to-purple-500',
+    },
+    {
+      title: 'Отправь код',
+      icon: '📱',
+      color: 'from-purple-500 to-pink-500',
+    },
+    {
+      title: 'Звони!',
+      icon: '📞',
+      color: 'from-green-500 to-emerald-500',
+    },
+  ];
 
   return (
     <div className="min-h-screen p-4 md:p-8 fade-in">
-      <div className="max-w-3xl mx-auto">
+      <div className="max-w-2xl mx-auto">
         {/* Header */}
         <div className="flex items-center gap-4 mb-8">
           <button
@@ -21,176 +44,181 @@ export default function SetupGuide({ onBack }: SetupGuideProps) {
             </svg>
             Назад
           </button>
-          <h1 className="text-2xl font-bold text-white">Как запустить ClearCall</h1>
         </div>
 
-        {/* Tabs */}
-        <div className="flex gap-2 mb-6 overflow-x-auto scrollbar-hide">
-          {[
-            { id: 'quick', label: '⚡ Быстрый старт', desc: '5 минут' },
-            { id: 'advanced', label: '🔧 Продвинутый', desc: 'Свой сервер' },
-            { id: 'server', label: '🌐 Через интернет', desc: 'Для мамы из РБ' },
-          ].map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id as any)}
-              className={`px-4 py-3 rounded-xl text-left min-w-[140px] transition-all ${
-                activeTab === tab.id
-                  ? 'bg-indigo-500/20 border border-indigo-400/50 text-indigo-200'
-                  : 'bg-white/5 border border-white/10 text-slate-400 hover:border-white/30'
-              }`}
-            >
-              <div className="font-medium text-sm">{tab.label}</div>
-              <div className="text-xs opacity-60 mt-0.5">{tab.desc}</div>
-            </button>
+        <h1 className="text-3xl font-bold text-white mb-2">Как запустить ClearCall</h1>
+        <p className="text-slate-400 mb-8">Пошаговая инструкция — 4 простых шага</p>
+
+        {/* Progress steps */}
+        <div className="flex items-center gap-2 mb-8">
+          {steps.map((step, i) => (
+            <div key={i} className="flex items-center gap-2 flex-1">
+              <button
+                onClick={() => setActiveStep(i)}
+                className={`w-10 h-10 rounded-full flex items-center justify-center text-lg transition-all shrink-0 ${
+                  activeStep === i
+                    ? `bg-gradient-to-r ${step.color} scale-110 shadow-lg`
+                    : activeStep > i
+                    ? 'bg-green-500/20 border border-green-500/50'
+                    : 'bg-white/5 border border-white/10'
+                }`}
+              >
+                {activeStep > i ? '✓' : step.icon}
+              </button>
+              {i < steps.length - 1 && (
+                <div className={`h-0.5 flex-1 rounded ${activeStep > i ? 'bg-green-500/50' : 'bg-white/10'}`} />
+              )}
+            </div>
           ))}
         </div>
 
-        {/* Content */}
-        <div className="glass-card p-6 md:p-8">
-          {activeTab === 'quick' && <QuickStart />}
-          {activeTab === 'advanced' && <AdvancedSetup />}
-          {activeTab === 'server' && <InternetSetup />}
+        {/* Step content */}
+        <div className="glass-card p-6 md:p-8 slide-up" key={activeStep}>
+          {activeStep === 0 && <Step0 />}
+          {activeStep === 1 && <Step1 />}
+          {activeStep === 2 && <Step2 />}
+          {activeStep === 3 && <Step3 />}
+        </div>
+
+        {/* Navigation */}
+        <div className="flex justify-between mt-6">
+          <button
+            onClick={() => setActiveStep(Math.max(0, activeStep - 1))}
+            disabled={activeStep === 0}
+            className="px-4 py-2 rounded-xl text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+          >
+            ← Назад
+          </button>
+          <button
+            onClick={() => setActiveStep(Math.min(steps.length - 1, activeStep + 1))}
+            disabled={activeStep === steps.length - 1}
+            className="btn-primary px-6 py-2 disabled:opacity-30 disabled:cursor-not-allowed"
+          >
+            Далее →
+          </button>
+        </div>
+
+        {/* Quick reference */}
+        <div className="mt-8 glass-card p-6">
+          <h3 className="text-white font-semibold mb-4 flex items-center gap-2">
+            <span className="text-xl">⚡</span> Краткая шпаргалка
+          </h3>
+          <div className="space-y-3 text-sm">
+            <div className="flex items-start gap-3">
+              <span className="text-indigo-400 font-mono text-xs bg-indigo-500/10 px-2 py-1 rounded">ПК</span>
+              <p className="text-slate-300">Открой этот сайт в <b className="text-white">Chrome</b> → «Создать комнату» → разреши камеру</p>
+            </div>
+            <div className="flex items-start gap-3">
+              <span className="text-purple-400 font-mono text-xs bg-purple-500/10 px-2 py-1 rounded">ЖЕНА</span>
+              <p className="text-slate-300">Открой этот же сайт на телефоне → «Присоединиться» → введи код</p>
+            </div>
+            <div className="flex items-start gap-3">
+              <span className="text-pink-400 font-mono text-xs bg-pink-500/10 px-2 py-1 rounded">СЫН</span>
+              <p className="text-slate-300">То же самое — открой сайт на телефоне и введи тот же код</p>
+            </div>
+            <div className="flex items-start gap-3">
+              <span className="text-green-400 font-mono text-xs bg-green-500/10 px-2 py-1 rounded">МАМА</span>
+              <p className="text-slate-300">Отправь ей ссылку на этот сайт + код комнаты (в WhatsApp/Telegram)</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Settings recommendation */}
+        <div className="mt-4 glass-card p-6">
+          <h3 className="text-white font-semibold mb-4 flex items-center gap-2">
+            <span className="text-xl">🎯</span> Рекомендуемые настройки
+          </h3>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="p-3 bg-indigo-500/10 rounded-xl border border-indigo-500/20 text-center">
+              <p className="text-2xl mb-1">📺</p>
+              <p className="text-indigo-300 font-bold">1080p</p>
+              <p className="text-slate-500 text-xs">Full HD</p>
+            </div>
+            <div className="p-3 bg-purple-500/10 rounded-xl border border-purple-500/20 text-center">
+              <p className="text-2xl mb-1">🎬</p>
+              <p className="text-purple-300 font-bold">30 FPS</p>
+              <p className="text-slate-500 text-xs">Плавность</p>
+            </div>
+            <div className="p-3 bg-green-500/10 rounded-xl border border-green-500/20 text-center">
+              <p className="text-2xl mb-1">📡</p>
+              <p className="text-green-300 font-bold">8000</p>
+              <p className="text-slate-500 text-xs">Кбит/с видео</p>
+            </div>
+            <div className="p-3 bg-amber-500/10 rounded-xl border border-amber-500/20 text-center">
+              <p className="text-2xl mb-1">🔊</p>
+              <p className="text-amber-300 font-bold">128</p>
+              <p className="text-slate-500 text-xs">Кбит/с аудио</p>
+            </div>
+          </div>
+          <p className="text-slate-500 text-xs mt-3">
+            💡 С твоим интернетом 500 Мбит/с можно ставить хоть 4K, но для мобильных лучше 1080p — стабильнее.
+          </p>
+        </div>
+
+        {/* FAQ */}
+        <div className="mt-4 glass-card p-6">
+          <h3 className="text-white font-semibold mb-4 flex items-center gap-2">
+            <span className="text-xl">❓</span> Частые вопросы
+          </h3>
+          <div className="space-y-4">
+            <div>
+              <p className="text-indigo-300 font-medium text-sm">Нужно ли что-то устанавливать?</p>
+              <p className="text-slate-400 text-sm mt-1">Нет! Просто открой сайт в браузере Chrome. На ПК и на телефонах.</p>
+            </div>
+            <div>
+              <p className="text-indigo-300 font-medium text-sm">Мама из Беларуси — это будет работать?</p>
+              <p className="text-slate-400 text-sm mt-1">Да! WebRTC работает через интернет. Нужен только Chrome на телефоне и интернет.</p>
+            </div>
+            <div>
+              <p className="text-indigo-300 font-medium text-sm">Почему качество лучше чем в MAX/WhatsApp?</p>
+              <p className="text-slate-400 text-sm mt-1">Мессенджеры сжимают видео до 480p и 500 Кбит/с. ClearCall передаёт до 20 Мбит/с без сжатия — картинка в 10-40 раз детальнее.</p>
+            </div>
+            <div>
+              <p className="text-indigo-300 font-medium text-sm">Сколько человек может быть в звонке?</p>
+              <p className="text-slate-400 text-sm mt-1">Сейчас до 3 человек (ты + 2 участника). ПК выступает как «хаб» — принимает и раздаёт видео.</p>
+            </div>
+            <div>
+              <p className="text-indigo-300 font-medium text-sm">Не работает — что делать?</p>
+              <p className="text-slate-400 text-sm mt-1">1) Убедись что все в Chrome. 2) Разреши доступ к камере. 3) Проверь что код комнаты совпадает. 4) Перезагрузи страницу.</p>
+            </div>
+          </div>
         </div>
       </div>
     </div>
   );
 }
 
-function QuickStart() {
+function Step0() {
   return (
-    <div className="space-y-6">
-      <div className="flex items-start gap-3">
-        <div className="w-8 h-8 rounded-full bg-indigo-500/20 flex items-center justify-center shrink-0 mt-0.5">
-          <span className="text-indigo-300 font-bold text-sm">1</span>
-        </div>
+    <div className="space-y-4">
+      <div className="flex items-center gap-3">
+        <span className="text-3xl">💻</span>
         <div>
-          <h3 className="text-white font-semibold">Открой на ПК</h3>
-          <p className="text-slate-400 text-sm mt-1">
-            Открой этот сайт в браузере Chrome на своём ПК. У тебя RTX 4060 — потянет любое качество!
-          </p>
+          <h2 className="text-xl font-bold text-white">Шаг 1: Открой сайт на ПК</h2>
+          <p className="text-slate-400 text-sm">На своём компьютере с Windows</p>
         </div>
       </div>
 
-      <div className="flex items-start gap-3">
-        <div className="w-8 h-8 rounded-full bg-indigo-500/20 flex items-center justify-center shrink-0 mt-0.5">
-          <span className="text-indigo-300 font-bold text-sm">2</span>
-        </div>
-        <div>
-          <h3 className="text-white font-semibold">Создай комнату</h3>
-          <p className="text-slate-400 text-sm mt-1">
-            Нажми "Создать комнату" и разреши доступ к камере и микрофону.
-          </p>
-        </div>
-      </div>
-
-      <div className="flex items-start gap-3">
-        <div className="w-8 h-8 rounded-full bg-indigo-500/20 flex items-center justify-center shrink-0 mt-0.5">
-          <span className="text-indigo-300 font-bold text-sm">3</span>
-        </div>
-        <div>
-          <h3 className="text-white font-semibold">Отправь код</h3>
-          <p className="text-slate-400 text-sm mt-1">
-            Скопируй код комнаты и отправь маме/сыну. Они откроют сайт на телефоне и введут код.
-          </p>
-          <div className="mt-2 p-3 bg-black/30 rounded-lg border border-white/10">
-            <p className="text-xs text-slate-500">💡 Сайт работает в любом мобильном браузере Chrome/Safari</p>
-          </div>
-        </div>
-      </div>
-
-      <div className="flex items-start gap-3">
-        <div className="w-8 h-8 rounded-full bg-indigo-500/20 flex items-center justify-center shrink-0 mt-0.5">
-          <span className="text-indigo-300 font-bold text-sm">4</span>
-        </div>
-        <div>
-          <h3 className="text-white font-semibold">Настрой качество</h3>
-          <p className="text-slate-400 text-sm mt-1">
-            В настройках выбери 1080p или выше, 30-60 FPS, и битрейт 8000+ Кбит/с для максимальной чёткости.
-          </p>
-        </div>
-      </div>
-
-      {/* Comparison */}
-      <div className="mt-8 p-4 bg-gradient-to-r from-indigo-500/10 to-purple-500/10 rounded-xl border border-indigo-500/20">
-        <h4 className="text-white font-semibold mb-3">📊 Сравнение качества</h4>
-        <div className="grid grid-cols-2 gap-3">
-          <div className="p-3 bg-red-500/10 rounded-lg border border-red-500/20">
-            <p className="text-red-300 text-sm font-medium">❌ WhatsApp / MAX</p>
-            <p className="text-slate-400 text-xs mt-1">480p, 500 Кбит/с, мыло</p>
-          </div>
-          <div className="p-3 bg-green-500/10 rounded-lg border border-green-500/20">
-            <p className="text-green-300 text-sm font-medium">✅ ClearCall</p>
-            <p className="text-slate-400 text-xs mt-1">1080p+, 8-20 Мбит/с, кристалл</p>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function AdvancedSetup() {
-  return (
-    <div className="space-y-6">
-      <div className="p-4 bg-amber-500/10 rounded-xl border border-amber-500/20 mb-6">
-        <p className="text-amber-200 text-sm">
-          ⚠️ Для работы через интернет (не только в одной Wi-Fi сети) нужен свой signaling сервер. 
-          PeerJS по умолчанию использует публичный сервер, но для стабильности лучше свой.
-        </p>
-      </div>
-
-      <h3 className="text-white font-semibold text-lg">Свой signaling сервер на ПК</h3>
-
-      <div className="space-y-4">
-        <div>
-          <h4 className="text-indigo-300 font-medium mb-2">1. Установи Node.js</h4>
-          <p className="text-slate-400 text-sm">Скачай с <span className="text-indigo-400">nodejs.org</span> (LTS версия)</p>
-        </div>
-
-        <div>
-          <h4 className="text-indigo-300 font-medium mb-2">2. Создай папку для сервера</h4>
-          <div className="bg-black/40 rounded-lg p-4 border border-white/10">
-            <code className="text-green-300 text-sm font-mono">
-              mkdir clearcall-server<br />
-              cd clearcall-server<br />
-              npm init -y<br />
-              npm install peerjs
-            </code>
-          </div>
-        </div>
-
-        <div>
-          <h4 className="text-indigo-300 font-medium mb-2">3. Создай файл server.js</h4>
-          <div className="bg-black/40 rounded-lg p-4 border border-white/10 overflow-x-auto">
-            <pre className="text-green-300 text-sm font-mono">{`const { PeerServer } = require('peer');
-
-const peerServer = PeerServer({
-  port: 9000,
-  path: '/myapp',
-  config: {
-    iceServers: [
-      { urls: 'stun:stun.l.google.com:19302' },
-      { urls: 'stun:stun1.l.google.com:19302' },
-    ]
-  }
-});
-
-console.log('🚀 ClearCall сервер запущен на порту 9000');`}</pre>
-          </div>
-        </div>
-
-        <div>
-          <h4 className="text-indigo-300 font-medium mb-2">4. Запусти сервер</h4>
-          <div className="bg-black/40 rounded-lg p-4 border border-white/10">
-            <code className="text-green-300 text-sm font-mono">node server.js</code>
-          </div>
-        </div>
-
-        <div>
-          <h4 className="text-indigo-300 font-medium mb-2">5. Открой порты в роутере</h4>
+      <div className="space-y-3">
+        <div className="p-4 bg-blue-500/10 rounded-xl border border-blue-500/20">
+          <p className="text-blue-200 text-sm font-medium mb-2">Открой этот сайт в браузере Google Chrome</p>
           <p className="text-slate-400 text-sm">
-            Пробрось порт 9000 на свой ПК в настройках роутера (Port Forwarding).
-            Также открой порты для WebRTC: UDP 10000-60000.
+            Chrome — лучший браузер для WebRTC. Он поддерживает все кодеки и даёт максимальное качество.
+          </p>
+        </div>
+
+        <div className="p-4 bg-white/5 rounded-xl border border-white/10">
+          <p className="text-white text-sm font-medium mb-2">⚠️ Важно:</p>
+          <ul className="text-slate-400 text-sm space-y-1">
+            <li>• Подключи ПК <b className="text-white">кабелем</b> к роутеру (не Wi-Fi) — стабильнее</li>
+            <li>• Закрой другие вкладки, которые едят интернет (YouTube, торренты)</li>
+            <li>• Убедись что камера и микрофон не заняты другими программами</li>
+          </ul>
+        </div>
+
+        <div className="p-4 bg-green-500/10 rounded-xl border border-green-500/20">
+          <p className="text-green-200 text-sm">
+            ✅ Когда браузер попросит доступ к камере и микрофону — нажми «Разрешить»
           </p>
         </div>
       </div>
@@ -198,114 +226,183 @@ console.log('🚀 ClearCall сервер запущен на порту 9000');`
   );
 }
 
-function InternetSetup() {
+function Step1() {
   return (
-    <div className="space-y-6">
-      <div className="p-4 bg-green-500/10 rounded-xl border border-green-500/20 mb-6">
-        <p className="text-green-200 text-sm">
-          🌍 Для звонков с мамой из Беларуси через интернет — нужен публичный IP или туннель.
-          С твоим интернетом 500 Мбит/с это будет работать отлично!
-        </p>
-      </div>
-
-      <h3 className="text-white font-semibold text-lg">Варианты для интернета</h3>
-
-      <div className="space-y-4">
-        {/* Option 1 */}
-        <div className="p-4 bg-white/5 rounded-xl border border-white/10">
-          <div className="flex items-center gap-2 mb-2">
-            <span className="text-green-400 font-bold">Вариант A:</span>
-            <span className="text-white font-medium">Публичный IP</span>
-            <span className="quality-badge hd text-xs">Проще всего</span>
-          </div>
-          <p className="text-slate-400 text-sm">
-            Позвони провайдеру и попроси публичный IP (обычно +100-200₽/мес). 
-            Тогда signaling сервер будет доступен из интернета напрямую.
-          </p>
-          <div className="mt-3 p-3 bg-black/30 rounded-lg">
-            <p className="text-xs text-slate-500">
-              💡 Проверь: зайди на 2ip.ru — если IP совпадает с тем, что показывает роутер, у тебя уже публичный IP!
-            </p>
-          </div>
-        </div>
-
-        {/* Option 2 */}
-        <div className="p-4 bg-white/5 rounded-xl border border-white/10">
-          <div className="flex items-center gap-2 mb-2">
-            <span className="text-indigo-400 font-bold">Вариант B:</span>
-            <span className="text-white font-medium">Без публичного IP</span>
-          </div>
-          <p className="text-slate-400 text-sm">
-            Используй публичный PeerJS сервер (работает из коробки!) или облачный VPS.
-            WebRTC сам найдёт путь через NAT с помощью STUN/TURN серверов.
-          </p>
-          <div className="mt-3 p-3 bg-black/30 rounded-lg">
-            <p className="text-xs text-slate-500">
-              💡 Это приложение УЖЕ работает через публичный PeerJS сервер — можно пользоваться прямо сейчас!
-            </p>
-          </div>
-        </div>
-
-        {/* Option 3 */}
-        <div className="p-4 bg-white/5 rounded-xl border border-white/10">
-          <div className="flex items-center gap-2 mb-2">
-            <span className="text-purple-400 font-bold">Вариант C:</span>
-            <span className="text-white font-medium">Облачный VPS</span>
-            <span className="quality-badge fhd text-xs">Надёжнее</span>
-          </div>
-          <p className="text-slate-400 text-sm">
-            Арендуй VPS (Timeweb, Selectel, ~200₽/мес) и разверни signaling сервер там.
-            Тогда всё будет работать стабильно 24/7 без зависимости от твоего ПК.
-          </p>
+    <div className="space-y-4">
+      <div className="flex items-center gap-3">
+        <span className="text-3xl">🏠</span>
+        <div>
+          <h2 className="text-xl font-bold text-white">Шаг 2: Создай комнату</h2>
+          <p className="text-slate-400 text-sm">Нажми кнопку на главной странице</p>
         </div>
       </div>
 
-      {/* Tips */}
-      <div className="mt-8 p-4 bg-gradient-to-r from-indigo-500/10 to-purple-500/10 rounded-xl border border-indigo-500/20">
-        <h4 className="text-white font-semibold mb-3">💡 Советы для лучшего качества</h4>
-        <ul className="space-y-2 text-sm text-slate-300">
-          <li className="flex items-start gap-2">
-            <span className="text-indigo-400">•</span>
-            Используй Chrome на ПК — лучшая поддержка WebRTC кодеков
-          </li>
-          <li className="flex items-start gap-2">
-            <span className="text-indigo-400">•</span>
-            На телефоне тоже открой в Chrome (не в встроенном браузере)
-          </li>
-          <li className="flex items-start gap-2">
-            <span className="text-indigo-400">•</span>
-            Поставь 1080p + 30 FPS + 8000 Кбит/с — идеально для мобильных
-          </li>
-          <li className="flex items-start gap-2">
-            <span className="text-indigo-400">•</span>
-            Если видео тормозит — снизь до 720p, но оставь высокий битрейт
-          </li>
-          <li className="flex items-start gap-2">
-            <span className="text-indigo-400">•</span>
-            Подключи ПК по кабелю к роутеру (не Wi-Fi) для стабильности
-          </li>
-        </ul>
+      <div className="space-y-3">
+        <div className="p-4 bg-indigo-500/10 rounded-xl border border-indigo-500/20">
+          <p className="text-indigo-200 text-sm font-medium mb-2">Нажми «Создать комнату»</p>
+          <p className="text-slate-400 text-sm">
+            Система автоматически сгенерирует 6-значный код (например: <code className="text-indigo-300 bg-black/30 px-1 rounded">A3K7NP</code>)
+          </p>
+        </div>
+
+        <div className="p-4 bg-white/5 rounded-xl border border-white/10">
+          <p className="text-white text-sm font-medium mb-2">📋 Настрой качество (кнопка «Качество» на главной):</p>
+          <div className="grid grid-cols-2 gap-2 mt-2">
+            <div className="p-2 bg-black/20 rounded-lg text-center">
+              <p className="text-xs text-slate-500">Разрешение</p>
+              <p className="text-white font-bold">1080p</p>
+            </div>
+            <div className="p-2 bg-black/20 rounded-lg text-center">
+              <p className="text-xs text-slate-500">FPS</p>
+              <p className="text-white font-bold">30</p>
+            </div>
+            <div className="p-2 bg-black/20 rounded-lg text-center">
+              <p className="text-xs text-slate-500">Видео</p>
+              <p className="text-white font-bold">8000 Кбит/с</p>
+            </div>
+            <div className="p-2 bg-black/20 rounded-lg text-center">
+              <p className="text-xs text-slate-500">Аудио</p>
+              <p className="text-white font-bold">128 Кбит/с</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="p-4 bg-amber-500/10 rounded-xl border border-amber-500/20">
+          <p className="text-amber-200 text-sm">
+            💡 Ты увидишь своё видео в маленьком окошке справа — это нормально. Большой экран пока пуст, пока не подключится кто-то.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Step2() {
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-3">
+        <span className="text-3xl">📱</span>
+        <div>
+          <h2 className="text-xl font-bold text-white">Шаг 3: Отправь код</h2>
+          <p className="text-slate-400 text-sm">Жене, сыну и маме</p>
+        </div>
       </div>
 
-      {/* Hardware check */}
-      <div className="mt-6 p-4 bg-green-500/10 rounded-xl border border-green-500/20">
-        <h4 className="text-green-300 font-semibold mb-2">✅ Твоё железо — отлично подходит!</h4>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-sm">
-          <div className="p-2 bg-black/20 rounded-lg">
-            <p className="text-slate-400">CPU</p>
-            <p className="text-white font-medium">Ryzen 5 5600</p>
-            <p className="text-green-400 text-xs">Кодирование VP9 ✓</p>
+      <div className="space-y-3">
+        <div className="p-4 bg-purple-500/10 rounded-xl border border-purple-500/20">
+          <p className="text-purple-200 text-sm font-medium mb-2">Скопируй код комнаты</p>
+          <p className="text-slate-400 text-sm">
+            Нажми на плашку с кодом внизу экрана — она скопируется в буфер обмена.
+          </p>
+          <div className="mt-3 flex items-center gap-2 justify-center">
+            <div className="bg-black/40 px-4 py-2 rounded-lg border border-white/10">
+              <code className="text-white font-mono text-lg tracking-wider">A3K7NP</code>
+            </div>
+            <span className="text-slate-500 text-sm">← примерно так выглядит</span>
           </div>
-          <div className="p-2 bg-black/20 rounded-lg">
-            <p className="text-slate-400">GPU</p>
-            <p className="text-white font-medium">RTX 4060 8GB</p>
-            <p className="text-green-400 text-xs">NVENC ✓</p>
+        </div>
+
+        <div className="p-4 bg-white/5 rounded-xl border border-white/10">
+          <p className="text-white text-sm font-medium mb-3">Отправь каждому:</p>
+          <div className="space-y-2">
+            <div className="flex items-center gap-3 p-2 bg-black/20 rounded-lg">
+              <span>👩</span>
+              <div>
+                <p className="text-white text-sm font-medium">Жене (она дома)</p>
+                <p className="text-slate-400 text-xs">Отправь код в Telegram/WhatsApp</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3 p-2 bg-black/20 rounded-lg">
+              <span>👦</span>
+              <div>
+                <p className="text-white text-sm font-medium">Сыну</p>
+                <p className="text-slate-400 text-xs">Отправь код + ссылку на сайт</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3 p-2 bg-black/20 rounded-lg">
+              <span>👵</span>
+              <div>
+                <p className="text-white text-sm font-medium">Маме (Беларусь)</p>
+                <p className="text-slate-400 text-xs">Отправь код + ссылку на сайт в WhatsApp/Telegram</p>
+              </div>
+            </div>
           </div>
-          <div className="p-2 bg-black/20 rounded-lg">
-            <p className="text-slate-400">Интернет</p>
-            <p className="text-white font-medium">500 Мбит/с</p>
-            <p className="text-green-400 text-xs">Хватит на 4K ✓</p>
+        </div>
+
+        <div className="p-4 bg-green-500/10 rounded-xl border border-green-500/20">
+          <p className="text-green-200 text-sm font-medium mb-2">Что они должны сделать на телефоне:</p>
+          <ol className="text-slate-400 text-sm space-y-1 list-decimal list-inside">
+            <li>Открыть этот сайт в <b className="text-white">Chrome</b> (на iPhone — Safari)</li>
+            <li>Нажать «Присоединиться»</li>
+            <li>Ввести код комнаты</li>
+            <li>Разрешить доступ к камере</li>
+          </ol>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Step3() {
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-3">
+        <span className="text-3xl">🎉</span>
+        <div>
+          <h2 className="text-xl font-bold text-white">Шаг 4: Звони!</h2>
+          <p className="text-slate-400 text-sm">Всё готово — наслаждайся качеством</p>
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        <div className="p-6 bg-gradient-to-r from-green-500/10 to-emerald-500/10 rounded-xl border border-green-500/20 text-center">
+          <div className="text-4xl mb-3">📹</div>
+          <p className="text-green-200 font-medium">Когда все подключатся — вы увидите друг друга в Full HD!</p>
+          <p className="text-slate-400 text-sm mt-2">Без мыла, без артефактов, без задержек</p>
+        </div>
+
+        <div className="p-4 bg-white/5 rounded-xl border border-white/10">
+          <p className="text-white text-sm font-medium mb-3">🎮 Управление во время звонка:</p>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="flex items-center gap-2 p-2 bg-black/20 rounded-lg">
+              <span className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-sm">🎤</span>
+              <span className="text-slate-300 text-sm">Микрофон вкл/выкл</span>
+            </div>
+            <div className="flex items-center gap-2 p-2 bg-black/20 rounded-lg">
+              <span className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-sm">📷</span>
+              <span className="text-slate-300 text-sm">Камера вкл/выкл</span>
+            </div>
+            <div className="flex items-center gap-2 p-2 bg-black/20 rounded-lg">
+              <span className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-sm">🔄</span>
+              <span className="text-slate-300 text-sm">Переключить камеру</span>
+            </div>
+            <div className="flex items-center gap-2 p-2 bg-black/20 rounded-lg">
+              <span className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-sm">⛶</span>
+              <span className="text-slate-300 text-sm">Полный экран</span>
+            </div>
           </div>
+        </div>
+
+        <div className="p-4 bg-indigo-500/10 rounded-xl border border-indigo-500/20">
+          <p className="text-indigo-200 text-sm font-medium mb-2">📊 Сравнение с мессенджерами:</p>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between p-2 bg-red-500/10 rounded-lg">
+              <span className="text-red-300 text-sm">❌ WhatsApp / MAX / Telegram</span>
+              <span className="text-slate-400 text-xs">480p • 500 Кбит/с</span>
+            </div>
+            <div className="flex items-center justify-between p-2 bg-green-500/10 rounded-lg">
+              <span className="text-green-300 text-sm">✅ ClearCall</span>
+              <span className="text-slate-400 text-xs">1080p • 8000 Кбит/с</span>
+            </div>
+          </div>
+          <p className="text-slate-500 text-xs mt-2">Разница в качестве — как между DVD и Blu-Ray 🎬</p>
+        </div>
+
+        <div className="p-4 bg-amber-500/10 rounded-xl border border-amber-500/20">
+          <p className="text-amber-200 text-sm">
+            💡 <b>Совет:</b> чтобы снова позвонить — просто открой сайт и нажми «Присоединиться» с тем же кодом. 
+            Или создай новую комнату — код будет другой.
+          </p>
         </div>
       </div>
     </div>
