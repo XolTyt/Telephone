@@ -1,454 +1,346 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
-import Peer, { MediaConnection } from 'peerjs';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import Peer, { type MediaConnection } from 'peerjs';
+import type { QualitySettings } from '../types';
+import { applyQuality, cameraConstraints, hasTurnConfiguration, iceConfiguration, invitation } from '../rtc';
 
-interface QualitySettings {
-  resolution: string;
-  fps: number;
-  videoBitrate: number;
-  audioBitrate: number;
+interface Props { roomId: string; isHost: boolean; onLeave: () => void; settings: QualitySettings }
+type State = 'connecting' | 'waiting' | 'connected' | 'error';
+
+function Video({ stream, local = false, hidden = false, onBlocked }: {
+  stream: MediaStream | null; local?: boolean; hidden?: boolean; onBlocked?: () => void;
+}) {
+  const ref = useRef<HTMLVideoElement>(null);
+  useEffect(() => {
+    const video = ref.current;
+    if (!video) return;
+    video.srcObject = stream;
+    if (stream) void video.play().catch(() => onBlocked?.());
+    return () => { video.srcObject = null; };
+  }, [stream, onBlocked]);
+  return <video ref={ref} autoPlay playsInline muted={local} className={`${local ? 'local-video' : 'remote-video'} ${hidden ? 'invisible' : ''}`} />;
 }
 
-interface CallRoomProps {
-  roomId: string;
-  isHost: boolean;
-  onLeave: () => void;
-  settings: QualitySettings;
-}
-
-type ConnectionState = 'connecting' | 'waiting' | 'connected' | 'error';
-
-export default function CallRoom({ roomId, isHost, onLeave, settings }: CallRoomProps) {
-  const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
-  const [isMuted, setIsMuted] = useState(false);
-  const [isVideoOff, setIsVideoOff] = useState(false);
-  const [isFrontCamera, setIsFrontCamera] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
-  const [callDuration, setCallDuration] = useState(0);
-  const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
-
-  const localVideoRef = useRef<HTMLVideoElement>(null);
-  const remoteVideoRef = useRef<HTMLVideoElement>(null);
+export default function CallRoom({ roomId, isHost, onLeave, settings }: Props) {
+  const [state, setState] = useState<State>('connecting');
+  const [message, setMessage] = useState('');
+  const [notice, setNotice] = useState('');
+  const [local, setLocal] = useState<MediaStream | null>(null);
+  const [remote, setRemote] = useState<MediaStream | null>(null);
+  const [muted, setMuted] = useState(false);
+  const [videoOff, setVideoOff] = useState(false);
+  const [front, setFront] = useState(true);
+  const [switching, setSwitching] = useState(false);
+  const [blocked, setBlocked] = useState(false);
+  const [seconds, setSeconds] = useState(0);
+  const [stats, setStats] = useState('Ожидание статистики');
+  const [attempt, setAttempt] = useState(0);
   const peerRef = useRef<Peer | null>(null);
   const callRef = useRef<MediaConnection | null>(null);
-  const localStreamRef = useRef<MediaStream | null>(null);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  const peerId = `clearcall-${roomId}-${isHost ? 'host' : 'guest'}`;
-  const remotePeerId = `clearcall-${roomId}-${isHost ? 'guest' : 'host'}`;
-
-  const getMediaConstraints = useCallback(() => {
-    const res = Number(settings.resolution);
-    return {
-      video: {
-        facingMode: isFrontCamera ? 'user' : 'environment',
-        width: { ideal: res === 2160 ? 3840 : res === 1440 ? 2560 : res === 1080 ? 1920 : 1280 },
-        height: { ideal: res === 2160 ? 2160 : res === 1440 ? 1440 : res === 1080 ? 1080 : 720 },
-        frameRate: { ideal: settings.fps, max: settings.fps },
-      },
-      audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-      },
-    };
-  }, [settings, isFrontCamera]);
-
-  const startLocalStream = useCallback(async () => {
-    try {
-      if (localStreamRef.current) {
-        localStreamRef.current.getTracks().forEach(track => track.stop());
-      }
-      const stream = await navigator.mediaDevices.getUserMedia(getMediaConstraints());
-      localStreamRef.current = stream;
-      if (localVideoRef.current) {
-        localVideoRef.current.srcObject = stream;
-      }
-      return stream;
-    } catch (err) {
-      console.error('Error accessing media devices:', err);
-      setError('Не удалось получить доступ к камере/микрофону. Проверьте разрешения.');
-      setConnectionState('error');
-      return null;
-    }
-  }, [getMediaConstraints]);
-
-  const applyBitrate = useCallback((call: MediaConnection) => {
-    // Apply bitrate settings via RTCPeerConnection
-    const pc = call.peerConnection;
-    pc.getSenders().forEach(sender => {
-      if (sender.track?.kind === 'video') {
-        const params = sender.getParameters();
-        if (!params.encodings) params.encodings = [{}];
-        params.encodings[0].maxBitrate = settings.videoBitrate * 1000;
-        params.encodings[0].maxFramerate = settings.fps;
-        sender.setParameters(params);
-      }
-      if (sender.track?.kind === 'audio') {
-        const params = sender.getParameters();
-        if (!params.encodings) params.encodings = [{}];
-        params.encodings[0].maxBitrate = settings.audioBitrate * 1000;
-        sender.setParameters(params);
-      }
-    });
-  }, [settings]);
+  const streamRef = useRef<MediaStream | null>(null);
+  const alive = useRef(false);
+  const cameraBusy = useRef(false);
+  const generation = useRef(0);
+  const mutedRef = useRef(false);
+  const videoOffRef = useRef(false);
+  const playbackBlocked = useCallback(() => setBlocked(true), []);
 
   useEffect(() => {
-    let mounted = true;
-
-    const init = async () => {
-      const stream = await startLocalStream();
-      if (!stream || !mounted) return;
-
-      // Create peer with custom config for better quality
-      const peer = new Peer(peerId, {
-        debug: 1,
-        config: {
-          iceServers: [
-            { urls: 'stun:stun.l.google.com:19302' },
-            { urls: 'stun:stun1.l.google.com:19302' },
-            { urls: 'stun:stun2.l.google.com:19302' },
-            { urls: 'stun:stun3.l.google.com:19302' },
-            { urls: 'stun:stun4.l.google.com:19302' },
-          ],
-          iceCandidatePoolSize: 10,
-        },
-      });
-
-      peerRef.current = peer;
-
-      peer.on('open', (id) => {
-        console.log('My peer ID:', id);
-        if (mounted) {
-          if (isHost) {
-            setConnectionState('waiting');
-          } else {
-            // Guest connects to host
-            const call = peer.call(remotePeerId, stream);
-            if (call) {
-              callRef.current = call;
-              setupCallHandlers(call);
-            }
-          }
-        }
-      });
-
-      peer.on('call', (call) => {
-        console.log('Incoming call');
-        callRef.current = call;
-        call.answer(stream);
-        setupCallHandlers(call);
-      });
-
-      peer.on('error', (err) => {
-        console.error('Peer error:', err);
-        if (mounted) {
-          if (err.type === 'peer-unavailable') {
-            setError('Комната не найдена. Убедитесь, что хост создал комнату.');
-            setConnectionState('error');
-          } else if (err.type === 'unavailable-id') {
-            // ID already taken, try with timestamp
-            setError('Эта комната уже занята. Попробуйте другой код.');
-            setConnectionState('error');
-          } else {
-            setError(`Ошибка подключения: ${err.message}`);
-            setConnectionState('error');
-          }
-        }
-      });
-
-      peer.on('disconnected', () => {
-        if (mounted) {
-          console.log('Peer disconnected, trying to reconnect...');
-          peer.reconnect();
-        }
-      });
+    if (!('wakeLock' in navigator)) return;
+    let active = true;
+    let lock: WakeLockSentinel | undefined;
+    const keepScreenOn = async () => {
+      if (!active || document.visibilityState !== 'visible' || (lock && !lock.released)) return;
+      try {
+        const acquired = await navigator.wakeLock.request('screen');
+        if (active) lock = acquired; else await acquired.release();
+      } catch { /* Low battery and browser policy may prevent a wake lock. */ }
     };
-
-    init();
-
+    document.addEventListener('visibilitychange', keepScreenOn);
+    void keepScreenOn();
     return () => {
-      mounted = false;
-      if (callRef.current) {
-        callRef.current.close();
-      }
-      if (peerRef.current) {
-        peerRef.current.destroy();
-      }
-      if (localStreamRef.current) {
-        localStreamRef.current.getTracks().forEach(track => track.stop());
+      active = false;
+      document.removeEventListener('visibilitychange', keepScreenOn);
+      void lock?.release();
+    };
+  }, []);
+
+  useEffect(() => {
+    alive.current = true;
+    generation.current += 1;
+    let disposed = false;
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    let recovery: ReturnType<typeof setTimeout> | undefined;
+    const abort = new AbortController();
+    let stream: MediaStream | null = null;
+    let peer: Peer | null = null;
+    const hostId = `clearcall-v2-${roomId}`;
+    const clearDeadline = () => { clearTimeout(deadline); };
+    const resetRemote = () => { setRemote(null); setSeconds(0); setStats('Ожидание статистики'); };
+    const scheduleDial = () => {
+      clearTimeout(retry);
+      if (!disposed && !isHost) retry = setTimeout(dial, 3500);
+    };
+    const drop = (call: MediaConnection) => {
+      if (callRef.current !== call) return;
+      callRef.current = null;
+      clearDeadline();
+      clearTimeout(recovery);
+      call.close();
+      if (!disposed) { resetRemote(); setState('waiting'); scheduleDial(); }
+    };
+    const attach = (call: MediaConnection) => {
+      callRef.current = call;
+      setState('connecting');
+      clearDeadline();
+      deadline = setTimeout(() => {
+        if (disposed || callRef.current !== call) return;
+        setNotice('Связь не установлена. Проверьте интернет на обоих телефонах. Повторяем подключение.');
+        drop(call);
+      }, 25000);
+      call.on('stream', incoming => {
+        if (disposed || callRef.current !== call) return;
+        clearDeadline();
+        setRemote(incoming);
+        setState('connected');
+        setNotice('');
+      });
+      call.on('close', () => drop(call));
+      call.on('error', () => drop(call));
+      const pc = call.peerConnection;
+      pc.addEventListener('connectionstatechange', () => {
+        if (disposed || callRef.current !== call) return;
+        if (pc.connectionState === 'connected') {
+          clearTimeout(recovery);
+          clearDeadline();
+          setState('connected');
+          void applyQuality(pc, settings).then(ok => {
+            if (!disposed && !ok) setNotice('Браузер сам управляет частью параметров качества.');
+          });
+        } else if (pc.connectionState === 'failed') drop(call);
+        else if (pc.connectionState === 'disconnected') {
+          setState('connecting');
+          clearTimeout(recovery);
+          recovery = setTimeout(() => drop(call), 10000);
+        }
+      });
+    };
+    function dial() {
+      if (disposed || !peer?.open || !stream || callRef.current) return;
+      const call = peer.call(hostId, stream);
+      if (call) attach(call); else scheduleDial();
+    }
+    const init = async () => {
+      try {
+        setState('connecting'); setMessage(''); setNotice(''); resetRemote();
+        if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+          throw new Error('Для камеры нужна ссылка HTTPS. Откройте сайт в Safari или Chrome, вне встроенного браузера мессенджера.');
+        }
+        const config = await iceConfiguration(abort.signal);
+        if (disposed) return;
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: cameraConstraints(settings, true),
+            audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+          });
+        } catch (error) {
+          if (error instanceof DOMException && error.name === 'OverconstrainedError') {
+            stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: true });
+          } else throw error;
+        }
+        if (disposed) { stream.getTracks().forEach(t => t.stop()); return; }
+        stream.getAudioTracks().forEach(t => { t.enabled = !mutedRef.current; });
+        stream.getVideoTracks().forEach(t => { t.enabled = !videoOffRef.current; });
+        streamRef.current = stream; setLocal(stream); setFront(true);
+        const options = {
+          config,
+          ...(import.meta.env.VITE_PEER_HOST ? {
+            host: import.meta.env.VITE_PEER_HOST,
+            port: Number(import.meta.env.VITE_PEER_PORT || 443),
+            path: import.meta.env.VITE_PEER_PATH || '/', secure: import.meta.env.VITE_PEER_SECURE !== 'false',
+          } : {}),
+        };
+        peer = isHost ? new Peer(hostId, options) : new Peer(options);
+        peerRef.current = peer;
+        peer.on('open', () => {
+          if (disposed) return;
+          setState('waiting');
+          if (!isHost) dial();
+        });
+        peer.on('call', call => {
+          if (disposed || !isHost || callRef.current || !stream) { call.close(); return; }
+          // PeerJS creates the RTCPeerConnection when answering.
+          call.answer(stream);
+          attach(call);
+        });
+        peer.on('error', error => {
+          if (disposed) return;
+          if (error.type === 'peer-unavailable') {
+            if (callRef.current) drop(callRef.current);
+            setState('waiting');
+            setNotice('Ждём первый телефон. Комната должна быть открыта на нём. Если комната занята, дождитесь завершения звонка.');
+            scheduleDial();
+          } else if (error.type === 'network' || error.type === 'server-error' || error.type === 'socket-error') {
+            setNotice('Сервер связи недоступен. Проверьте интернет и нажмите «Переподключиться».');
+            if (!callRef.current) { setMessage('Нет связи с сервером подключения.'); setState('error'); }
+          } else {
+            setMessage(error.type === 'unavailable-id' ? 'Эта комната уже открыта на другом устройстве. Создайте новую комнату.' : `Не удалось подключиться: ${error.message}`);
+            setState('error');
+          }
+        });
+        peer.on('disconnected', () => {
+          if (disposed) return;
+          clearTimeout(retry);
+          retry = setTimeout(() => {
+            if (!disposed && peer && !peer.destroyed && peer.disconnected) {
+              try { peer.reconnect(); } catch { setNotice('Нажмите «Переподключиться», чтобы восстановить связь.'); }
+            }
+          }, 2000);
+        });
+      } catch (error) {
+        if (disposed) return;
+        const name = error instanceof DOMException ? error.name : '';
+        const explanation = name === 'NotAllowedError' ? 'Разрешите камеру и микрофон в настройках браузера и повторите вход.'
+          : name === 'NotFoundError' ? 'Камера или микрофон не найдены.'
+          : name === 'NotReadableError' ? 'Камера занята другим приложением. Закройте его и повторите вход.'
+          : error instanceof Error ? error.message : 'Не удалось запустить камеру.';
+        setMessage(explanation); setState('error');
       }
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const setupCallHandlers = (call: MediaConnection) => {
-    call.on('stream', (remoteStream) => {
-      console.log('Received remote stream');
-      setRemoteStream(remoteStream);
-      setConnectionState('connected');
-      if (remoteVideoRef.current) {
-        remoteVideoRef.current.srcObject = remoteStream;
-      }
-      // Start call timer
-      if (!timerRef.current) {
-        timerRef.current = setInterval(() => {
-          setCallDuration(prev => prev + 1);
-        }, 1000);
-      }
-    });
-
-    call.on('close', () => {
-      console.log('Call closed');
-      setConnectionState('waiting');
-      setRemoteStream(null);
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-        timerRef.current = null;
-      }
-    });
-
-    call.on('error', (err) => {
-      console.error('Call error:', err);
-      setError('Ошибка звонка');
-    });
-
-    // Apply bitrate after connection
-    call.peerConnection.onconnectionstatechange = () => {
-      if (call.peerConnection.connectionState === 'connected') {
-        applyBitrate(call);
-      }
+    const online = () => {
+      if (peer?.disconnected && !peer.destroyed) { try { peer.reconnect(); } catch { /* manual retry remains available */ } }
+      if (!isHost) scheduleDial();
     };
-  };
+    window.addEventListener('online', online);
+    void init();
+    return () => {
+      disposed = true; alive.current = false; abort.abort();
+      clearTimeout(retry); clearTimeout(deadline); clearTimeout(recovery);
+      window.removeEventListener('online', online);
+      const call = callRef.current; callRef.current = null; call?.close();
+      peer?.destroy(); peerRef.current = null;
+      streamRef.current?.getTracks().forEach(t => t.stop());
+      stream?.getTracks().forEach(t => t.stop());
+      streamRef.current = null;
+    };
+  }, [roomId, isHost, settings, attempt]);
 
-  const toggleMute = () => {
-    if (localStreamRef.current) {
-      const audioTracks = localStreamRef.current.getAudioTracks();
-      audioTracks.forEach(track => {
-        track.enabled = !track.enabled;
-      });
-      setIsMuted(!isMuted);
-    }
-  };
+  useEffect(() => {
+    if (state !== 'connected') return;
+    const timer = setInterval(() => setSeconds(s => s + 1), 1000);
+    return () => clearInterval(timer);
+  }, [state]);
 
-  const toggleVideo = () => {
-    if (localStreamRef.current) {
-      const videoTracks = localStreamRef.current.getVideoTracks();
-      videoTracks.forEach(track => {
-        track.enabled = !track.enabled;
-      });
-      setIsVideoOff(!isVideoOff);
-    }
-  };
+  useEffect(() => {
+    if (state !== 'connected') return;
+    let active = true;
+    let busy = false;
+    const previous = new Map<string, { bytes: number; time: number }>();
+    const timer = setInterval(async () => {
+      const pc = callRef.current?.peerConnection;
+      if (!pc || busy) return;
+      busy = true;
+      try {
+        const report = await pc.getStats();
+        const parts: string[] = [];
+        report.forEach(item => {
+          if ((item.type === 'inbound-rtp' || item.type === 'outbound-rtp') && (item.kind === 'video' || item.mediaType === 'video') && !item.isRemote) {
+            const bytes = item.bytesReceived ?? item.bytesSent ?? 0;
+            const last = previous.get(item.id);
+            const rate = last && item.timestamp > last.time ? Math.max(0, (bytes - last.bytes) * 8 / (item.timestamp - last.time)) : null;
+            previous.set(item.id, { bytes, time: item.timestamp });
+            const direction = item.type === 'inbound-rtp' ? 'Приём' : 'Отправка';
+            parts.push(`${direction}: ${item.frameWidth && item.frameHeight ? `${item.frameWidth}×${item.frameHeight}` : '—'} · ${Math.round(item.framesPerSecond ?? 0)} FPS${rate === null ? '' : ` · ${(rate / 1000).toFixed(1)} Мбит/с`}${item.qualityLimitationReason === 'bandwidth' ? ' · ограничено сетью' : ''}`);
+          }
+          if (item.type === 'transport' && item.selectedCandidatePairId) {
+            const pair = report.get(item.selectedCandidatePairId);
+            const candidate = pair && report.get(pair.localCandidateId);
+            if (candidate) parts.push(candidate.candidateType === 'relay' ? 'Через TURN' : 'Прямое соединение');
+          }
+        });
+        if (active) setStats(parts.join(' | ') || 'Браузер пока не предоставил статистику');
+      } catch { /* stats are optional; the call continues */ }
+      finally { busy = false; }
+    }, 2000);
+    return () => { active = false; clearInterval(timer); };
+  }, [state]);
 
   const switchCamera = async () => {
-    setIsFrontCamera(!isFrontCamera);
-    const stream = await startLocalStream();
-    if (stream && callRef.current) {
-      const videoSender = callRef.current.peerConnection.getSenders().find(s => s.track?.kind === 'video');
-      if (videoSender && stream.getVideoTracks()[0]) {
-        await videoSender.replaceTrack(stream.getVideoTracks()[0]);
+    if (cameraBusy.current || !streamRef.current) return;
+    cameraBusy.current = true; setSwitching(true);
+    const currentGeneration = generation.current;
+    const old = streamRef.current.getVideoTracks()[0];
+    let replacement: MediaStream | null = null;
+    try {
+      // Mobile browsers often require releasing the old camera first. Audio stays alive.
+      old?.stop();
+      replacement = await navigator.mediaDevices.getUserMedia({ video: cameraConstraints(settings, !front), audio: false });
+      if (!alive.current || generation.current !== currentGeneration) { replacement.getTracks().forEach(t => t.stop()); return; }
+      const track = replacement.getVideoTracks()[0];
+      track.enabled = !videoOffRef.current;
+      const sender = callRef.current?.peerConnection.getSenders().find(s => s.track?.kind === 'video');
+      if (sender) await sender.replaceTrack(track);
+      if (!alive.current || generation.current !== currentGeneration) { track.stop(); return; }
+      const stream = streamRef.current!;
+      if (old) stream.removeTrack(old);
+      stream.addTrack(track);
+      setLocal(new MediaStream(stream.getTracks()));
+      setFront(!front);
+      if (callRef.current) await applyQuality(callRef.current.peerConnection, settings);
+    } catch {
+      replacement?.getTracks().forEach(t => t.stop());
+      if (alive.current && generation.current === currentGeneration) {
+        setNotice('Не удалось сменить камеру. Нажмите «Переподключиться», чтобы восстановить видео. Звук продолжает работать.');
       }
+    } finally { cameraBusy.current = false; if (alive.current) setSwitching(false); }
+  };
+
+  const share = async () => {
+    const url = invitation(roomId);
+    try {
+      if (navigator.share) await navigator.share({ title: 'Звонок ClearCall', url });
+      else { await navigator.clipboard.writeText(url); setNotice('Ссылка скопирована. Отправьте её на второй телефон.'); }
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === 'AbortError')) setNotice(`Скопируйте ссылку: ${url}`);
     }
   };
-
-  const copyRoomId = () => {
-    navigator.clipboard.writeText(roomId);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const resume = async () => {
+    const videos = Array.from(document.querySelectorAll('video'));
+    const results = await Promise.allSettled(videos.map(v => v.play()));
+    setBlocked(results.some(r => r.status === 'rejected'));
   };
 
-  const handleLeave = () => {
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
-    if (callRef.current) callRef.current.close();
-    if (peerRef.current) peerRef.current.destroy();
-    if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach(track => track.stop());
-    }
-    onLeave();
-  };
-
-  const formatDuration = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  };
-
-  return (
-    <div className="min-h-screen flex flex-col bg-black relative">
-      {/* Remote video (full screen) */}
-      <div className="flex-1 relative overflow-hidden">
-        {connectionState === 'connected' && remoteStream ? (
-          <video
-            ref={remoteVideoRef}
-            autoPlay
-            playsInline
-            className="w-full h-full object-cover"
-          />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center bg-gradient-to-b from-slate-900 to-black">
-            {connectionState === 'connecting' && (
-              <div className="text-center fade-in">
-                <div className="w-16 h-16 border-4 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin mx-auto mb-4"></div>
-                <p className="text-slate-300 text-lg">Подключение...</p>
-              </div>
-            )}
-            {connectionState === 'waiting' && (
-              <div className="text-center fade-in">
-                <div className="w-20 h-20 rounded-full bg-indigo-500/20 flex items-center justify-center mx-auto mb-4 pulse-ring">
-                  <svg className="w-10 h-10 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
-                  </svg>
-                </div>
-                <p className="text-slate-300 text-lg font-medium">Ожидание подключения...</p>
-                <p className="text-slate-500 text-sm mt-2">Отправьте код комнаты другому участнику</p>
-              </div>
-            )}
-            {connectionState === 'error' && (
-              <div className="text-center fade-in max-w-sm px-4">
-                <div className="w-16 h-16 rounded-full bg-red-500/20 flex items-center justify-center mx-auto mb-4">
-                  <svg className="w-8 h-8 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
-                  </svg>
-                </div>
-                <p className="text-red-300 text-lg font-medium">Ошибка</p>
-                <p className="text-slate-400 text-sm mt-2">{error}</p>
-                <button onClick={handleLeave} className="btn-primary mt-4 px-6 py-2 text-sm">
-                  Вернуться
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Local video (PiP) */}
-        <div className="absolute top-4 right-4 w-32 h-44 md:w-40 md:h-56 rounded-2xl overflow-hidden shadow-2xl border-2 border-white/10">
-          {isVideoOff ? (
-            <div className="w-full h-full bg-slate-800 flex items-center justify-center">
-              <svg className="w-8 h-8 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
-              </svg>
-            </div>
-          ) : (
-            <video
-              ref={localVideoRef}
-              autoPlay
-              playsInline
-              muted
-              className="w-full h-full object-cover"
-            />
-          )}
-          <div className="absolute bottom-2 left-2 right-2 text-center">
-            <span className="text-xs text-white/70 bg-black/50 px-2 py-0.5 rounded-full">
-              {isMuted ? '🔇 Вы' : '🎤 Вы'}
-            </span>
-          </div>
-        </div>
-
-        {/* Connection quality indicator */}
-        {connectionState === 'connected' && (
-          <div className="absolute top-4 left-4 flex items-center gap-2">
-            <div className="flex items-center gap-1 bg-black/50 backdrop-blur-sm px-3 py-1.5 rounded-full">
-              <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse"></span>
-              <span className="text-xs text-green-300 font-medium">{formatDuration(callDuration)}</span>
-            </div>
-            <div className="quality-badge fhd text-xs">
-              {settings.resolution === '720' ? 'HD' : settings.resolution === '1080' ? 'FHD' : settings.resolution === '1440' ? '2K' : '4K'}
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Controls */}
-      <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/80 to-transparent">
-        {/* Room code */}
-        <div className="flex justify-center mb-4">
-          <button
-            onClick={copyRoomId}
-            className="flex items-center gap-2 bg-white/10 backdrop-blur-sm px-4 py-2 rounded-full border border-white/10 hover:bg-white/20 transition-all"
-          >
-            <svg className="w-4 h-4 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
-            </svg>
-            <span className="text-sm font-mono text-white">
-              {copied ? '✓ Скопировано!' : `Код: ${roomId}`}
-            </span>
-          </button>
-        </div>
-
-        {/* Control buttons */}
-        <div className="flex items-center justify-center gap-4">
-          <button
-            onClick={toggleMute}
-            className={`btn-control ${isMuted ? 'active' : ''}`}
-            title={isMuted ? 'Включить микрофон' : 'Выключить микрофон'}
-          >
-            {isMuted ? (
-              <svg className="w-5 h-5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
-                <path strokeLinecap="round" strokeLinejoin="round" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
-              </svg>
-            ) : (
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-              </svg>
-            )}
-          </button>
-
-          <button
-            onClick={toggleVideo}
-            className={`btn-control ${isVideoOff ? 'active' : ''}`}
-            title={isVideoOff ? 'Включить камеру' : 'Выключить камеру'}
-          >
-            {isVideoOff ? (
-              <svg className="w-5 h-5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
-              </svg>
-            ) : (
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-              </svg>
-            )}
-          </button>
-
-          {/* Hang up */}
-          <button onClick={handleLeave} className="btn-danger">
-            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M16 8l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2M5 3a2 2 0 00-2 2v1c0 8.284 6.716 15 15 15h1a2 2 0 002-2v-3.28a1 1 0 00-.684-.948l-4.493-1.498a1 1 0 00-1.21.502l-1.13 2.257a11.042 11.042 0 01-5.516-5.517l2.257-1.128a1 1 0 00.502-1.21L9.228 3.683A1 1 0 008.279 3H5z" />
-            </svg>
-          </button>
-
-          {/* Switch camera */}
-          <button
-            onClick={switchCamera}
-            className="btn-control"
-            title="Переключить камеру"
-          >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-            </svg>
-          </button>
-
-          {/* Fullscreen */}
-          <button
-            onClick={() => {
-              if (document.fullscreenElement) {
-                document.exitFullscreen();
-              } else {
-                document.documentElement.requestFullscreen();
-              }
-            }}
-            className="btn-control"
-            title="Полный экран"
-          >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
-            </svg>
-          </button>
-        </div>
+  return <div className="call-screen">
+    <div className="remote-stage">
+      <Video stream={remote} onBlocked={playbackBlocked} />
+      {!remote && <div className="call-placeholder">
+        <div className="text-5xl mb-5">📹</div>
+        <h1 className="text-xl font-semibold">{state === 'error' ? 'Не удалось начать звонок' : state === 'connecting' ? 'Подключение…' : 'Ожидаем второй телефон'}</h1>
+        <p className="text-slate-400 mt-3 max-w-sm">{state === 'error' ? message : isHost ? 'Отправьте ссылку собеседнику и оставайтесь на этой странице.' : 'Первый телефон должен открыть комнату. Подключение повторяется автоматически.'}</p>
+        {isHost && state !== 'error' && <button className="btn-primary mt-6" onClick={share}>Отправить ссылку</button>}
+      </div>}
+    </div>
+    <div className="call-header">
+      <span className="quality-badge fhd">{state === 'connected' ? `${Math.floor(seconds / 60).toString().padStart(2, '0')}:${(seconds % 60).toString().padStart(2, '0')}` : state === 'connecting' ? 'Подключение' : 'ClearCall'}</span>
+      <button className="text-xs text-slate-300 underline" onClick={() => setAttempt(n => n + 1)} disabled={switching}>Переподключиться</button>
+    </div>
+    <div className="local-preview"><Video stream={local} local hidden={videoOff} />{videoOff && <span className="absolute inset-0 flex items-center justify-center">Камера выключена</span>}</div>
+    <div className="call-footer">
+      {blocked && <button className="btn-primary mb-3" onClick={resume}>Включить видео и звук</button>}
+      {notice && <p role="status" className="call-notice">{notice}</p>}
+      {!hasTurnConfiguration && <p className="text-xs text-amber-200 mb-3">TURN не настроен: некоторые мобильные сети могут не соединиться.</p>}
+      {state === 'connected' && <p className="text-xs text-slate-300 mb-3" aria-label="Статистика качества">{stats}</p>}
+      <div className="flex justify-center gap-2 mb-3"><button className="room-link" onClick={share}>Поделиться ссылкой</button><span className="room-link font-mono">{roomId}</span></div>
+      <div className="flex justify-center gap-3">
+        <button className={`btn-control ${muted ? 'active' : ''}`} aria-label={muted ? 'Включить микрофон' : 'Выключить микрофон'} aria-pressed={muted} onClick={() => {
+          mutedRef.current = !muted; setMuted(!muted); streamRef.current?.getAudioTracks().forEach(t => { t.enabled = !mutedRef.current; });
+        }}>{muted ? '🔇' : '🎤'}</button>
+        <button className={`btn-control ${videoOff ? 'active' : ''}`} aria-label={videoOff ? 'Включить камеру' : 'Выключить камеру'} aria-pressed={videoOff} onClick={() => {
+          videoOffRef.current = !videoOff; setVideoOff(!videoOff); streamRef.current?.getVideoTracks().forEach(t => { t.enabled = !videoOffRef.current; });
+        }}>{videoOff ? '🚫' : '📹'}</button>
+        <button className="btn-danger" aria-label="Завершить звонок" onClick={onLeave}>☎</button>
+        <button className="btn-control" aria-label="Переключить камеру" disabled={switching || !local} onClick={switchCamera}>{switching ? '…' : '🔄'}</button>
       </div>
     </div>
-  );
+  </div>;
 }

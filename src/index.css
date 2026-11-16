@@ -201,3 +201,24 @@
     scrollbar-width: none;
   }
 }
+
+/* Phone call viewport, with room for browser chrome and screen cutouts. */
+.call-screen { position: relative; height: 100vh; height: 100dvh; overflow: hidden; background: #080b18; }
+.remote-stage { position: absolute; inset: 0; }
+.remote-video { width: 100%; height: 100%; object-fit: contain; }
+.call-placeholder { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 180px 20px 260px; }
+.call-header { position: absolute; top: max(16px, env(safe-area-inset-top)); left: 16px; display: flex; flex-direction: column; align-items: flex-start; gap: 12px; max-width: calc(100% - 160px); }
+.local-preview { position: absolute; top: max(16px, env(safe-area-inset-top)); right: 16px; width: 110px; height: 150px; border: 1px solid #ffffff30; border-radius: 16px; overflow: hidden; background: #1e293b; font-size: 12px; }
+.local-video { width: 100%; height: 100%; object-fit: cover; }
+.call-footer { position: absolute; bottom: 0; width: 100%; text-align: center; padding: 40px 12px max(16px, env(safe-area-inset-bottom)); background: linear-gradient(transparent, #000d 35%); }
+.call-notice { margin: 0 auto 12px; max-width: 600px; font-size: 13px; color: #fde68a; overflow-wrap: anywhere; }
+.room-link { font-size: 12px; padding: 8px; border-radius: 12px; background: #ffffff15; }
+button:disabled { cursor: not-allowed; opacity: .45; }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid #a5b4fc; outline-offset: 3px; }
+select option { background: #1e1e42; color: #f1f5f9; }
+@media (orientation: landscape) and (max-height: 550px) {
+  .local-preview { width: 90px; height: 100px; }
+  .call-placeholder { padding: 20px 120px 170px; }
+  .call-placeholder .text-5xl { display: none; }
+  .call-footer { padding-top: 10px; }
+}
