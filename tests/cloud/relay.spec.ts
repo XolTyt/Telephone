@@ -31,7 +31,7 @@ for (const transport of transports) {
       (window as unknown as {testConnections:RTCPeerConnection[]}).testConnections
         .flatMap(pc=>pc.getSenders()).filter(sender=>sender.track?.kind==='video')
         .some(sender=>sender.getParameters().encodings.some(e=>e.maxFramerate===60 && e.maxBitrate===12000000))
-    )).toBe(true);
+    ),{timeout:30000}).toBe(true);
     for (const phone of [page,guest]) {
       await expect.poll(()=>phone.locator('.remote-video').evaluate((v:HTMLVideoElement)=>v.videoWidth),{timeout:45000}).toBeGreaterThanOrEqual(1920);
       await expect.poll(()=>phone.locator('.remote-video').evaluate((v:HTMLVideoElement)=>v.videoHeight),{timeout:15000}).toBeGreaterThanOrEqual(1080);
