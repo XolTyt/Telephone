@@ -12,7 +12,7 @@ export function cameraConstraints(settings: QualitySettings, front: boolean): Me
 
 export function roomFromUrl(): string {
   const room = new URL(window.location.href).searchParams.get('room') ?? '';
-  return /^[A-Z2-9]{12}$/.test(room.toUpperCase()) ? room.toUpperCase() : '';
+  return /^(?:[A-Z2-9]{12}|[A-HJ-NP-Z2-9]{24})$/.test(room.toUpperCase()) ? room.toUpperCase() : '';
 }
 
 export function createRoom(): string {

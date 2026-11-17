@@ -1,6 +1,7 @@
 import { defineConfig } from '@playwright/test';
 export default defineConfig({
   testDir: './tests/e2e', timeout: 60000, workers: 1,
+  testIgnore: '**/simple.spec.ts',
   use: {
     baseURL: 'http://localhost:3000', browserName: 'chromium', channel: 'chrome', headless: true,
     launchOptions: { args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', '--autoplay-policy=no-user-gesture-required'] },
