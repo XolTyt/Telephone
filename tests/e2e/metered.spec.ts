@@ -23,6 +23,12 @@ test('one-link managed SDK call exchanges real media, survives signaling drop an
     expect(await phone.locator('.remote-video').evaluate((v:HTMLVideoElement) => (v.srcObject as MediaStream).getAudioTracks().some(t => t.readyState === 'live'))).toBe(true);
   }
   await page.getByRole('button', { name:'Выключить микрофон' }).click();
+  await page.getByRole('button', { name:'60 FPS' }).click();
+  await expect(page.getByRole('button', { name:'60 FPS ✓' })).toBeEnabled();
+  expect(await page.locator('.local-video').evaluate((v:HTMLVideoElement) => (v.srcObject as MediaStream).getVideoTracks()[0].getConstraints().frameRate)).toMatchObject({ideal:60,max:60});
+  await expect.poll(() => guest.locator('.remote-video').evaluate((v:HTMLVideoElement) => v.videoWidth)).toBeGreaterThanOrEqual(1920);
+  await page.getByRole('button', { name:'30 FPS' }).click();
+  await expect(page.getByRole('button', { name:'30 FPS ✓' })).toBeEnabled();
   await page.getByRole('button', { name:'Переключить камеру' }).click();
   await expect(page.getByRole('button', { name:'Переключить камеру' })).toBeEnabled();
   expect(await page.locator('.local-video').evaluate((v:HTMLVideoElement) => (v.srcObject as MediaStream).getAudioTracks()[0].enabled)).toBe(false);

@@ -9,7 +9,7 @@ vi.mock('@metered-ca/realtime', () => ({ MeteredPeer: class extends EventEmitter
   constructor() { super(); mocks.peers.push(this); }
 } }));
 import ManagedCall from '../src/components/ManagedCall';
-class Track { enabled = true; stop = vi.fn(); constructor(public kind: string) {} }
+class Track { enabled = true; stop = vi.fn(); applyConstraints = vi.fn().mockResolvedValue(undefined); getSettings = () => ({frameRate:30}); constructor(public kind: string) {} }
 class Stream {
   tracks: Track[]; constructor(tracks = [new Track('video'),new Track('audio')]) { this.tracks=[...tracks]; }
   getTracks() {return this.tracks;} getVideoTracks() {return this.tracks.filter(t=>t.kind==='video');}
@@ -27,6 +27,20 @@ beforeEach(() => {
   vi.spyOn(HTMLMediaElement.prototype,'play').mockResolvedValue();
 });
 afterEach(()=>{cleanup();vi.unstubAllGlobals();vi.useRealTimers();});
+it('changes FPS without rejoining or replacing media and reports a camera limited to 30 FPS', async()=>{
+  render(<ManagedCall roomId="ABCDEFGH2345ABCDEFGH2345" onLeave={()=>{}}/>);
+  await screen.findByRole('heading',{name:'Ждём собеседника'});
+  fireEvent.click(screen.getByRole('button',{name:'Выключить микрофон'}));
+  fireEvent.click(screen.getByRole('button',{name:'60 FPS'}));
+  await screen.findByText(/Эта камера сейчас выдаёт 30 FPS/);
+  expect(streams[0].getVideoTracks()[0].applyConstraints).toHaveBeenCalledWith({frameRate:{ideal:60,max:60}});
+  expect(streams[0].getAudioTracks()[0].enabled).toBe(false);
+  expect(mocks.join).toHaveBeenCalledTimes(1); expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledTimes(1);
+  streams[0].getVideoTracks()[0].applyConstraints.mockRejectedValueOnce(new Error('unsupported'));
+  fireEvent.click(screen.getByRole('button',{name:'30 FPS'}));
+  await screen.findByText('Не удалось изменить FPS. Звонок продолжается с прежними настройками.');
+  expect(screen.getByRole('button',{name:'60 FPS ✓'}).getAttribute('aria-pressed')).toBe('true');
+});
 it('joins the same named room and releases resources when leaving', async()=>{
   const view=render(<ManagedCall roomId="ABCDEFGH2345ABCDEFGH2345" onLeave={()=>{}}/>);
   await screen.findByRole('heading',{name:'Ждём собеседника'});

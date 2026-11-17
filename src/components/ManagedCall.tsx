@@ -3,7 +3,7 @@ import { MeteredPeer, type RemotePeer } from '@metered-ca/realtime';
 import { applyQuality, cameraConstraints, invitation } from '../rtc';
 import Video from './Video';
 
-const quality = { resolution: '1080', fps: 30, videoBitrate: 8000, audioBitrate: 128 };
+const qualityFor = (fps: number) => ({ resolution: '1080', fps, videoBitrate: fps === 60 ? 12000 : 8000, audioBitrate: 128 });
 function explanation(error: unknown): string {
   const code = (error as { code?: string; closeCode?: number })?.code ?? (error as { closeCode?: number })?.closeCode ?? (error as Error)?.name;
   if (code === 'action_not_permitted' || code === 'channel_not_authorized' || code === 4003) return 'Сервер отклонил разрешения приложения. Владельцу нужно включить Send, Subscribe, Publish и Presence у ключа.';
@@ -33,6 +33,8 @@ export default function ManagedCall({ roomId, onLeave }: { roomId: string; onLea
   const [attempt, setAttempt] = useState(0);
   const [stats, setStats] = useState('');
   const [checks, setChecks] = useState<string[]>([]);
+  const [fps, setFps] = useState(30);
+  const qualityRef = useRef(qualityFor(30));
   const peerRef = useRef<MeteredPeer | null>(null);
   const selectedRef = useRef<RemotePeer | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -87,7 +89,7 @@ export default function ManagedCall({ roomId, onLeave }: { roomId: string; onLea
       other.on('stream-removed', () => { if (!disposed && selectedRef.current === other) setRemote(null); });
       const apply = () => {
         if (disposed || selectedRef.current !== other) return;
-        void applyQuality(other.pc as RTCPeerConnection, quality).then(ok => {
+        void applyQuality(other.pc as RTCPeerConnection, qualityRef.current).then(ok => {
           if (!disposed && !ok) record('Часть параметров качества управляется браузером');
         });
       };
@@ -177,7 +179,7 @@ export default function ManagedCall({ roomId, onLeave }: { roomId: string; onLea
         setStatus('Разрешите камеру и микрофон');
         let stream: MediaStream;
         try {
-          stream = await navigator.mediaDevices.getUserMedia({ video: cameraConstraints(quality, true), audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+          stream = await navigator.mediaDevices.getUserMedia({ video: cameraConstraints(qualityRef.current, true), audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
         } catch (e) {
           if (!(e instanceof DOMException) || e.name !== 'OverconstrainedError') throw e;
           stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: true });
@@ -254,17 +256,43 @@ export default function ManagedCall({ roomId, onLeave }: { roomId: string; onLea
     let acquired: MediaStream | null = null;
     try {
       let changed = true;
-      try { acquired = await navigator.mediaDevices.getUserMedia({ video: cameraConstraints(quality, !front), audio: false }); }
-      catch { changed = false; acquired = await navigator.mediaDevices.getUserMedia({ video: cameraConstraints(quality, front), audio: false }); }
+      try { acquired = await navigator.mediaDevices.getUserMedia({ video: cameraConstraints(qualityRef.current, !front), audio: false }); }
+      catch { changed = false; acquired = await navigator.mediaDevices.getUserMedia({ video: cameraConstraints(qualityRef.current, front), audio: false }); }
       if (generation !== epoch.current) { acquired.getTracks().forEach(t => t.stop()); return; }
       const track = acquired.getVideoTracks()[0]; track.enabled = !videoOff; track.contentHint = 'detail';
       await peer.replaceTrack(old, track);
       if (generation !== epoch.current) { track.stop(); return; }
       stream.removeTrack(old); stream.addTrack(track); setLocal(new MediaStream(stream.getTracks()));
       if (changed) setFront(!front); else setNotice('Другую камеру включить не удалось. Возвращена прежняя камера.');
-      if (selectedRef.current) await applyQuality(selectedRef.current.pc as RTCPeerConnection, quality);
+      if (selectedRef.current) await applyQuality(selectedRef.current.pc as RTCPeerConnection, qualityRef.current);
     } catch { acquired?.getTracks().forEach(t => t.stop()); if (generation === epoch.current) setError('Не удалось восстановить камеру. Звук сохраняется; нажмите «Подключиться снова» для восстановления видео.'); }
     finally { if (generation === epoch.current) { busy.current = false; setSwitching(false); } }
+  };
+  const changeFps = async (next: number) => {
+    const track = streamRef.current?.getVideoTracks()[0];
+    if (!track || busy.current || next === fps) return;
+    busy.current = true; setSwitching(true);
+    const generation = epoch.current;
+    const previous = qualityRef.current;
+    try {
+      await track.applyConstraints({ frameRate: { ideal: next, max: next } });
+      if (generation !== epoch.current) return;
+      qualityRef.current = qualityFor(next); setFps(next);
+      const ok = !selectedRef.current || await applyQuality(selectedRef.current.pc as RTCPeerConnection, qualityRef.current);
+      if (generation !== epoch.current) return;
+      const actual = Math.round(track.getSettings().frameRate ?? 0);
+      setNotice(actual && actual < next - 2
+        ? `Выбрано ${next} FPS. Эта камера сейчас выдаёт ${actual} FPS; фактическая передача видна в статистике.`
+        : `${next} FPS включены для вашей камеры.${ok ? '' : ' Часть параметров передачи управляется браузером.'}`);
+    } catch {
+      if (generation !== epoch.current) return;
+      qualityRef.current = previous;
+      setFps(previous.fps);
+      try { await track.applyConstraints({ frameRate: { ideal: previous.fps, max: previous.fps } }); } catch { /* Keep the live track. */ }
+      if (generation === epoch.current) setNotice('Не удалось изменить FPS. Звонок продолжается с прежними настройками.');
+    } finally {
+      if (generation === epoch.current) { busy.current = false; setSwitching(false); }
+    }
   };
   return <main className="call-screen">
     <div className="remote-stage"><Video stream={remote} onBlocked={playbackBlocked} />
@@ -280,11 +308,12 @@ export default function ManagedCall({ roomId, onLeave }: { roomId: string; onLea
         const results = await Promise.allSettled(Array.from(document.querySelectorAll('video'), v => v.play())); setBlocked(results.some(r => r.status === 'rejected'));
       }}>Включить видео и звук</button>}
       {ready && <button className="btn-primary mb-4" onClick={share}>Скопировать ссылку</button>}
+      {local && <div className="flex items-center justify-center gap-3 mb-3"><span>Моё видео:</span>{[30, 60].map(value => <button key={value} className="room-link" aria-pressed={fps === value} disabled={switching} onClick={() => void changeFps(value)}>{value} FPS{fps === value ? ' ✓' : ''}</button>)}</div>}
       <div className="flex justify-center gap-3">
         {local && <><button className={`btn-control ${muted ? 'active' : ''}`} aria-label={muted ? 'Включить микрофон' : 'Выключить микрофон'} aria-pressed={muted} onClick={() => { streamRef.current?.getAudioTracks().forEach(t => { t.enabled = muted; }); setMuted(!muted); }}>{muted ? '🔇' : '🎤'}</button><button className={`btn-control ${videoOff ? 'active' : ''}`} aria-label={videoOff ? 'Включить камеру' : 'Выключить камеру'} aria-pressed={videoOff} onClick={() => { streamRef.current?.getVideoTracks().forEach(t => { t.enabled = videoOff; }); setVideoOff(!videoOff); }}>📹</button><button className="btn-control" aria-label="Переключить камеру" disabled={switching} onClick={switchCamera}>🔄</button></>}
         <button className="btn-danger" aria-label="Завершить звонок" onClick={onLeave}>☎</button>
       </div>
-      <details className="call-details"><summary>Качество и проверка связи</summary><p aria-label="Статистика качества">{stats || 'Медиа ещё не подключены'}</p><p>Запрос: 1080p, 30 FPS, до 8 Мбит/с. Реальное качество зависит от камеры и сети.</p><ul>{checks.map((check, index) => <li key={index}>{check}</li>)}</ul><button className="room-link mt-2" onClick={async () => {
+      <details className="call-details"><summary>Качество и проверка связи</summary><p aria-label="Статистика качества">{stats || 'Медиа ещё не подключены'}</p><p>Запрос: 1080p, {fps} FPS, до {fps === 60 ? 12 : 8} Мбит/с. 60 FPS требуют больше трафика и заряда. Реальное качество зависит от камеры и сети.</p><ul>{checks.map((check, index) => <li key={index}>{check}</li>)}</ul><button className="room-link mt-2" onClick={async () => {
         try { await navigator.clipboard.writeText([...checks, stats].filter(Boolean).join('\n')); setNotice('Данные проверки скопированы. Можно отправить их владельцу приложения.'); }
         catch { setNotice('Не удалось скопировать данные. Можно сделать скриншот этого раздела.'); }
       }}>Скопировать данные проверки</button></details>

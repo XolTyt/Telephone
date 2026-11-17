@@ -25,6 +25,13 @@ for (const transport of transports) {
     const guest=await context.newPage(); const guestUrl=new URL(link);
     if(transport!=='direct')guestUrl.searchParams.set('relay',relay);
     await guest.goto(guestUrl.href); await guest.getByRole('button',{name:'Войти в звонок'}).click();
+    await page.getByRole('button',{name:'60 FPS'}).click();
+    await expect(page.getByRole('button',{name:'60 FPS ✓'})).toBeEnabled();
+    await expect.poll(()=>page.evaluate(()=>
+      (window as unknown as {testConnections:RTCPeerConnection[]}).testConnections
+        .flatMap(pc=>pc.getSenders()).filter(sender=>sender.track?.kind==='video')
+        .some(sender=>sender.getParameters().encodings.some(e=>e.maxFramerate===60 && e.maxBitrate===12000000))
+    )).toBe(true);
     for (const phone of [page,guest]) {
       await expect.poll(()=>phone.locator('.remote-video').evaluate((v:HTMLVideoElement)=>v.videoWidth),{timeout:45000}).toBeGreaterThanOrEqual(1920);
       await expect.poll(()=>phone.evaluate(async()=>{
