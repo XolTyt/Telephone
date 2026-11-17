@@ -224,3 +224,7 @@ select option { background: #1e1e42; color: #f1f5f9; }
 }
 .direct-setup { min-height: 100vh; min-height: 100dvh; padding-top: max(16px, env(safe-area-inset-top)); }
 .direct-preview { height: 150px; width: 110px; border-radius: 16px; overflow: hidden; background: #1e293b; }
+.call-details { font-size: 11px; color: #94a3b8; max-width: 600px; margin: 12px auto 0; }
+.call-details summary { cursor: pointer; }
+.call-details[open] { background: #0f172aee; border-radius: 10px; padding: 10px; max-height: 180px; overflow: auto; text-align: left; }
+.call-details p { margin: 6px 0; }

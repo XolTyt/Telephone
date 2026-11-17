@@ -13,9 +13,12 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "test:e2e:simple": "playwright test --config playwright.simple.config.ts"
+    "test:e2e:simple": "playwright test --config playwright.simple.config.ts",
+    "test:e2e:metered": "playwright test --config playwright.metered.config.ts",
+    "test:cloud": "playwright test --config playwright.cloud.config.ts"
   },
   "dependencies": {
+    "@metered-ca/realtime": "^1.2.1",
     "livekit-client": "^2.24.1",
     "livekit-server-sdk": "^2.20.0",
     "peerjs": "^1.5.5",

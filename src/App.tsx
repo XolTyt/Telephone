@@ -8,19 +8,23 @@ import DirectRoom from './components/DirectRoom';
 import { hasDirectLink } from './direct';
 import SimpleLobby from './components/SimpleLobby';
 const SimpleCall = lazy(() => import('./components/SimpleCall'));
+const ManagedCall = lazy(() => import('./components/ManagedCall'));
 
 export default function App() {
-  return import.meta.env.VITE_CALL_ENGINE === 'livekit' ? <SimpleApp /> : <LegacyApp />;
+  return import.meta.env.VITE_CALL_ENGINE === 'peerjs' ? <LegacyApp /> : <SimpleApp />;
 }
 
 function SimpleApp() {
   const [roomId, setRoomId] = useState(roomFromUrl);
   const [inCall, setInCall] = useState(false);
   return <div className="min-h-screen gradient-bg mesh-gradient">
-    {inCall ? <Suspense fallback={<p role="status" className="p-8 text-center">Готовим звонок…</p>}><SimpleCall roomId={roomId} onLeave={() => {
+    {inCall ? <Suspense fallback={<p role="status" className="p-8 text-center">Готовим звонок…</p>}>{import.meta.env.VITE_CALL_ENGINE === 'livekit' ? <SimpleCall roomId={roomId} onLeave={() => {
       setInCall(false); setRoomId('');
       const url = new URL(window.location.href); url.search = ''; url.hash = ''; window.history.replaceState(null, '', url);
-    }} /></Suspense> : <SimpleLobby initialRoom={roomId.length === 24 ? roomId : ''} onJoin={room => { setRoomId(room); setInCall(true); }} />}
+    }} /> : <ManagedCall roomId={roomId} onLeave={() => {
+      setInCall(false); setRoomId('');
+      const url = new URL(window.location.href); url.search = ''; url.hash = ''; window.history.replaceState(null, '', url);
+    }} />}</Suspense> : <SimpleLobby initialRoom={roomId.length === 24 ? roomId : ''} onJoin={room => { setRoomId(room); setInCall(true); }} />}
   </div>;
 }
 
