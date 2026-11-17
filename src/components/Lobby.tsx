@@ -6,10 +6,11 @@ interface Props {
   initialRoom: string;
   onJoinCall: (id: string, host: boolean) => void;
   onShowGuide: () => void;
+  onDirectCall: () => void;
   settings: QualitySettings;
   onSettingsChange: (settings: QualitySettings) => void;
 }
-export default function Lobby({ initialRoom, onJoinCall, onShowGuide, settings, onSettingsChange }: Props) {
+export default function Lobby({ initialRoom, onJoinCall, onShowGuide, onDirectCall, settings, onSettingsChange }: Props) {
   const [room, setRoom] = useState(initialRoom);
   const [showSettings, setShowSettings] = useState(false);
   const valid = /^[A-Z2-9]{12}$/.test(room);
@@ -18,6 +19,8 @@ export default function Lobby({ initialRoom, onJoinCall, onShowGuide, settings, 
     <div className="glass-card p-6 w-full max-w-md space-y-4">
       {initialRoom && <p className="text-indigo-200">Вас пригласили в звонок. Разрешите доступ к камере и микрофону после входа.</p>}
       <button className="btn-primary w-full" onClick={() => onJoinCall(createRoom(), true)}>Создать комнату</button>
+      <button className="w-full rounded-xl border border-indigo-400/40 p-3 text-indigo-200" onClick={onDirectCall}>Позвонить без сервера подключения</button>
+      <p className="text-xs text-slate-400">Если обычная комната не подключается: резервный звонок с обменом приглашением и ответной ссылкой.</p>
       <p className="text-sm text-slate-400 text-center">или войдите по приглашению / коду</p>
       <label className="block text-sm text-slate-300" htmlFor="room">Код комнаты</label>
       <input id="room" className="input-field font-mono text-center tracking-wider" autoCapitalize="characters" autoCorrect="off" spellCheck={false} maxLength={12} placeholder="12 символов" value={room} onChange={e => setRoom(e.target.value.toUpperCase().replace(/[^A-Z2-9]/g, ''))} onKeyDown={e => { if (e.key === 'Enter' && valid) onJoinCall(room, false); }} />

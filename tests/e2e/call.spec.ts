@@ -29,7 +29,9 @@ test('two phone-sized browsers exchange real WebRTC media and reconnect', async 
   await expect.poll(() => guest.locator('.remote-video').evaluate((v: HTMLVideoElement) => v.videoWidth), { timeout: 40000 }).toBeGreaterThan(0);
   await guest.getByRole('button', { name: 'Завершить звонок' }).click();
   await expect(guest.getByRole('heading', { name: 'ClearCall', exact: true })).toBeVisible();
-  await expect(page.getByText('Ожидаем второй телефон')).toBeVisible({ timeout: 15000 });
+  // A remote browser closing can be detected through ICE rather than a close message:
+  // allow time for ICE detection plus the app's 10-second reconnection grace period.
+  await expect(page.getByText('Ожидаем второй телефон')).toBeVisible({ timeout: 30000 });
   await guest.goto(`/?room=${room}`);
   await guest.getByRole('button', { name: 'Войти в звонок' }).click();
   await expect.poll(() => guest.locator('.remote-video').evaluate((v: HTMLVideoElement) => v.videoWidth), { timeout: 30000 }).toBeGreaterThan(0);

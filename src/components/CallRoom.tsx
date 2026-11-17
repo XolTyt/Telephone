@@ -2,25 +2,12 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Peer, { type MediaConnection } from 'peerjs';
 import type { QualitySettings } from '../types';
 import { applyQuality, cameraConstraints, hasTurnConfiguration, iceConfiguration, invitation } from '../rtc';
+import Video from './Video';
 
-interface Props { roomId: string; isHost: boolean; onLeave: () => void; settings: QualitySettings }
+interface Props { roomId: string; isHost: boolean; onLeave: () => void; settings: QualitySettings; onDirectCall?: () => void }
 type State = 'connecting' | 'waiting' | 'connected' | 'error';
 
-function Video({ stream, local = false, hidden = false, onBlocked }: {
-  stream: MediaStream | null; local?: boolean; hidden?: boolean; onBlocked?: () => void;
-}) {
-  const ref = useRef<HTMLVideoElement>(null);
-  useEffect(() => {
-    const video = ref.current;
-    if (!video) return;
-    video.srcObject = stream;
-    if (stream) void video.play().catch(() => onBlocked?.());
-    return () => { video.srcObject = null; };
-  }, [stream, onBlocked]);
-  return <video ref={ref} autoPlay playsInline muted={local} className={`${local ? 'local-video' : 'remote-video'} ${hidden ? 'invisible' : ''}`} />;
-}
-
-export default function CallRoom({ roomId, isHost, onLeave, settings }: Props) {
+export default function CallRoom({ roomId, isHost, onLeave, settings, onDirectCall }: Props) {
   const [state, setState] = useState<State>('connecting');
   const [message, setMessage] = useState('');
   const [notice, setNotice] = useState('');
@@ -71,6 +58,7 @@ export default function CallRoom({ roomId, isHost, onLeave, settings }: Props) {
     let retry: ReturnType<typeof setTimeout> | undefined;
     let deadline: ReturnType<typeof setTimeout> | undefined;
     let recovery: ReturnType<typeof setTimeout> | undefined;
+    let serverDeadline: ReturnType<typeof setTimeout> | undefined;
     const abort = new AbortController();
     let stream: MediaStream | null = null;
     let peer: Peer | null = null;
@@ -162,9 +150,17 @@ export default function CallRoom({ roomId, isHost, onLeave, settings }: Props) {
         };
         peer = isHost ? new Peer(hostId, options) : new Peer(options);
         peerRef.current = peer;
+        serverDeadline = setTimeout(() => {
+          if (disposed || peer?.open) return;
+          setMessage('Сервер подключения не отвечает из этой сети. Попробуйте звонок без сервера подключения.');
+          setState('error');
+          peer?.destroy();
+        }, 20000);
         peer.on('open', () => {
           if (disposed) return;
-          setState('waiting');
+          clearTimeout(serverDeadline);
+          setNotice('');
+          if (!callRef.current) setState('waiting');
           if (!isHost) dial();
         });
         peer.on('call', call => {
@@ -175,6 +171,7 @@ export default function CallRoom({ roomId, isHost, onLeave, settings }: Props) {
         });
         peer.on('error', error => {
           if (disposed) return;
+          clearTimeout(serverDeadline);
           if (error.type === 'peer-unavailable') {
             if (callRef.current) drop(callRef.current);
             setState('waiting');
@@ -215,7 +212,7 @@ export default function CallRoom({ roomId, isHost, onLeave, settings }: Props) {
     void init();
     return () => {
       disposed = true; alive.current = false; abort.abort();
-      clearTimeout(retry); clearTimeout(deadline); clearTimeout(recovery);
+      clearTimeout(retry); clearTimeout(deadline); clearTimeout(recovery); clearTimeout(serverDeadline);
       window.removeEventListener('online', online);
       const call = callRef.current; callRef.current = null; call?.close();
       peer?.destroy(); peerRef.current = null;
@@ -318,6 +315,7 @@ export default function CallRoom({ roomId, isHost, onLeave, settings }: Props) {
         <h1 className="text-xl font-semibold">{state === 'error' ? 'Не удалось начать звонок' : state === 'connecting' ? 'Подключение…' : 'Ожидаем второй телефон'}</h1>
         <p className="text-slate-400 mt-3 max-w-sm">{state === 'error' ? message : isHost ? 'Отправьте ссылку собеседнику и оставайтесь на этой странице.' : 'Первый телефон должен открыть комнату. Подключение повторяется автоматически.'}</p>
         {isHost && state !== 'error' && <button className="btn-primary mt-6" onClick={share}>Отправить ссылку</button>}
+        {state === 'error' && onDirectCall && <button className="btn-primary mt-4" onClick={onDirectCall}>Позвонить без сервера подключения</button>}
       </div>}
     </div>
     <div className="call-header">

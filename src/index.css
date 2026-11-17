@@ -222,3 +222,5 @@ select option { background: #1e1e42; color: #f1f5f9; }
   .call-placeholder .text-5xl { display: none; }
   .call-footer { padding-top: 10px; }
 }
+.direct-setup { min-height: 100vh; min-height: 100dvh; padding-top: max(16px, env(safe-area-inset-top)); }
+.direct-preview { height: 150px; width: 110px; border-radius: 16px; overflow: hidden; background: #1e293b; }
