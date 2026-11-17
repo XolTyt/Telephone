@@ -1,5 +1,17 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
-import { createRoom, roomFromUrl, invitation, applyQuality, iceConfiguration } from '../src/rtc';
+import { createRoom, roomFromUrl, invitation, applyQuality, iceConfiguration, requestFullHd, isFullHd } from '../src/rtc';
+
+it('requests a full rectangular frame and tries portrait capture when landscape is unavailable', async () => {
+  const applyConstraints = vi.fn().mockRejectedValueOnce(new Error('unsupported')).mockResolvedValue(undefined);
+  const track = { applyConstraints, getSettings: () => ({width:1080,height:1920}) } as unknown as MediaStreamTrack;
+  expect(await requestFullHd(track,30)).toBe(true);
+  expect(applyConstraints).toHaveBeenLastCalledWith(expect.objectContaining({width:{exact:1080},height:{exact:1920}}));
+  expect(isFullHd(1080,1080)).toBe(false); expect(isFullHd(1280,720)).toBe(false);
+});
+it('does not call unsupported capture Full HD', async () => {
+  const track = {applyConstraints:vi.fn().mockRejectedValue(new Error('unsupported')),getSettings:()=>({width:1280,height:720})} as unknown as MediaStreamTrack;
+  expect(await requestFullHd(track,30)).toBe(false);
+});
 
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 beforeEach(() => window.history.replaceState(null, '', '/'));

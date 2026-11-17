@@ -1,5 +1,23 @@
 import type { QualitySettings } from './types';
 
+export function isFullHd(width = 0, height = 0): boolean {
+  return Math.max(width, height) >= 1920 && Math.min(width, height) >= 1080;
+}
+
+export async function requestFullHd(track: MediaStreamTrack, fps: number): Promise<boolean> {
+  // Request actual capture dimensions, rather than an ideal that can select a square frame.
+  for (const [width, height] of [[1920, 1080], [1080, 1920]]) {
+    try {
+      await track.applyConstraints({ width: { exact: width }, height: { exact: height },
+        aspectRatio: { exact: width / height }, frameRate: { ideal: fps, max: fps } });
+      const actual = track.getSettings();
+      if (isFullHd(actual.width, actual.height)) return true;
+    } catch { /* Try the other sensor orientation; keep the existing track on failure. */ }
+  }
+  const actual = track.getSettings();
+  return isFullHd(actual.width, actual.height);
+}
+
 export function cameraConstraints(settings: QualitySettings, front: boolean): MediaTrackConstraints {
   const height = Number(settings.resolution);
   return {

@@ -34,6 +34,7 @@ for (const transport of transports) {
     )).toBe(true);
     for (const phone of [page,guest]) {
       await expect.poll(()=>phone.locator('.remote-video').evaluate((v:HTMLVideoElement)=>v.videoWidth),{timeout:45000}).toBeGreaterThanOrEqual(1920);
+      await expect.poll(()=>phone.locator('.remote-video').evaluate((v:HTMLVideoElement)=>v.videoHeight),{timeout:15000}).toBeGreaterThanOrEqual(1080);
       await expect.poll(()=>phone.evaluate(async()=>{
         let packets=0;
         for(const pc of (window as unknown as {testConnections:RTCPeerConnection[]}).testConnections) {

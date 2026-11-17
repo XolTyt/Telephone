@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { MeteredPeer, type RemotePeer } from '@metered-ca/realtime';
-import { applyQuality, cameraConstraints, invitation } from '../rtc';
+import { applyQuality, cameraConstraints, invitation, isFullHd, requestFullHd } from '../rtc';
 import Video from './Video';
 
 const qualityFor = (fps: number) => ({ resolution: '1080', fps, videoBitrate: fps === 60 ? 12000 : 8000, audioBitrate: 128 });
@@ -34,6 +34,7 @@ export default function ManagedCall({ roomId, onLeave }: { roomId: string; onLea
   const [stats, setStats] = useState('');
   const [checks, setChecks] = useState<string[]>([]);
   const [fps, setFps] = useState(30);
+  const [captureInfo, setCaptureInfo] = useState('');
   const qualityRef = useRef(qualityFor(30));
   const peerRef = useRef<MeteredPeer | null>(null);
   const selectedRef = useRef<RemotePeer | null>(null);
@@ -185,6 +186,11 @@ export default function ManagedCall({ roomId, onLeave }: { roomId: string; onLea
           stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: true });
         }
         if (disposed || peerRef.current !== peer) { stream.getTracks().forEach(t => t.stop()); return; }
+        const videoTrack = stream.getVideoTracks()[0];
+        await requestFullHd(videoTrack, qualityRef.current.fps);
+        if (disposed || peerRef.current !== peer) { stream.getTracks().forEach(t => t.stop()); return; }
+        const captured = videoTrack.getSettings();
+        setCaptureInfo(`${isFullHd(captured.width, captured.height) ? 'Камера Full HD' : 'Камера не выдала Full HD'}: ${captured.width ?? '—'}×${captured.height ?? '—'}`);
         stream.getVideoTracks().forEach(track => { track.contentHint = 'detail'; });
         streamRef.current = stream; setLocal(stream); setMuted(false); setVideoOff(false); setFront(true);
         peer.addStream(stream);
@@ -216,7 +222,7 @@ export default function ManagedCall({ roomId, onLeave }: { roomId: string; onLea
             const bytes = item.bytesSent ?? item.bytesReceived ?? 0; const last = previous.get(item.id);
             const rate = last && item.timestamp > last.time ? Math.max(0, (bytes - last.bytes) * 8 / (item.timestamp - last.time) / 1000).toFixed(1) : null;
             previous.set(item.id, { time: item.timestamp, bytes });
-            parts.push(`${item.type === 'inbound-rtp' ? 'Приём' : 'Отправка'}: ${item.frameWidth ?? '—'}×${item.frameHeight ?? '—'} · ${Math.round(item.framesPerSecond ?? 0)} FPS${rate ? ` · ${rate} Мбит/с` : ''}${item.qualityLimitationReason === 'bandwidth' ? ' · ограничено сетью' : item.qualityLimitationReason === 'cpu' ? ' · ограничено устройством' : ''}`);
+            parts.push(`${item.type === 'inbound-rtp' ? 'Приём' : 'Отправка'}: ${item.frameWidth ?? '—'}×${item.frameHeight ?? '—'} (${isFullHd(item.frameWidth, item.frameHeight) ? 'Full HD' : 'ниже Full HD'}) · ${Math.round(item.framesPerSecond ?? 0)} FPS${rate ? ` · ${rate} Мбит/с` : ''}${item.qualityLimitationReason === 'bandwidth' ? ' · ограничено сетью' : item.qualityLimitationReason === 'cpu' ? ' · ограничено устройством' : ''}`);
           }
           if (item.type === 'transport' && item.selectedCandidatePairId) {
             const pair = report.get(item.selectedCandidatePairId); const candidate = pair && report.get(pair.localCandidateId);
@@ -260,6 +266,10 @@ export default function ManagedCall({ roomId, onLeave }: { roomId: string; onLea
       catch { changed = false; acquired = await navigator.mediaDevices.getUserMedia({ video: cameraConstraints(qualityRef.current, front), audio: false }); }
       if (generation !== epoch.current) { acquired.getTracks().forEach(t => t.stop()); return; }
       const track = acquired.getVideoTracks()[0]; track.enabled = !videoOff; track.contentHint = 'detail';
+      await requestFullHd(track, qualityRef.current.fps);
+      if (generation !== epoch.current) { track.stop(); return; }
+      const captured = track.getSettings();
+      setCaptureInfo(`${isFullHd(captured.width, captured.height) ? 'Камера Full HD' : 'Камера не выдала Full HD'}: ${captured.width ?? '—'}×${captured.height ?? '—'}`);
       await peer.replaceTrack(old, track);
       if (generation !== epoch.current) { track.stop(); return; }
       stream.removeTrack(old); stream.addTrack(track); setLocal(new MediaStream(stream.getTracks()));
@@ -275,7 +285,7 @@ export default function ManagedCall({ roomId, onLeave }: { roomId: string; onLea
     const generation = epoch.current;
     const previous = qualityRef.current;
     try {
-      await track.applyConstraints({ frameRate: { ideal: next, max: next } });
+      await track.applyConstraints({ ...track.getConstraints?.(), frameRate: { ideal: next, max: next } });
       if (generation !== epoch.current) return;
       qualityRef.current = qualityFor(next); setFps(next);
       const ok = !selectedRef.current || await applyQuality(selectedRef.current.pc as RTCPeerConnection, qualityRef.current);
@@ -288,7 +298,7 @@ export default function ManagedCall({ roomId, onLeave }: { roomId: string; onLea
       if (generation !== epoch.current) return;
       qualityRef.current = previous;
       setFps(previous.fps);
-      try { await track.applyConstraints({ frameRate: { ideal: previous.fps, max: previous.fps } }); } catch { /* Keep the live track. */ }
+      try { await track.applyConstraints({ ...track.getConstraints?.(), frameRate: { ideal: previous.fps, max: previous.fps } }); } catch { /* Keep the live track. */ }
       if (generation === epoch.current) setNotice('Не удалось изменить FPS. Звонок продолжается с прежними настройками.');
     } finally {
       if (generation === epoch.current) { busy.current = false; setSwitching(false); }
@@ -308,6 +318,7 @@ export default function ManagedCall({ roomId, onLeave }: { roomId: string; onLea
         const results = await Promise.allSettled(Array.from(document.querySelectorAll('video'), v => v.play())); setBlocked(results.some(r => r.status === 'rejected'));
       }}>Включить видео и звук</button>}
       {ready && <button className="btn-primary mb-4" onClick={share}>Скопировать ссылку</button>}
+      {local && <p className="text-sm text-slate-300 mb-3">{captureInfo}. Приоритет — чёткость. Разрешение передачи и приёма — в проверке связи.</p>}
       {local && <div className="flex items-center justify-center gap-3 mb-3"><span>Моё видео:</span>{[30, 60].map(value => <button key={value} className="room-link" aria-pressed={fps === value} disabled={switching} onClick={() => void changeFps(value)}>{value} FPS{fps === value ? ' ✓' : ''}</button>)}</div>}
       <div className="flex justify-center gap-3">
         {local && <><button className={`btn-control ${muted ? 'active' : ''}`} aria-label={muted ? 'Включить микрофон' : 'Выключить микрофон'} aria-pressed={muted} onClick={() => { streamRef.current?.getAudioTracks().forEach(t => { t.enabled = muted; }); setMuted(!muted); }}>{muted ? '🔇' : '🎤'}</button><button className={`btn-control ${videoOff ? 'active' : ''}`} aria-label={videoOff ? 'Включить камеру' : 'Выключить камеру'} aria-pressed={videoOff} onClick={() => { streamRef.current?.getVideoTracks().forEach(t => { t.enabled = videoOff; }); setVideoOff(!videoOff); }}>📹</button><button className="btn-control" aria-label="Переключить камеру" disabled={switching} onClick={switchCamera}>🔄</button></>}
