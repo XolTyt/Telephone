@@ -67,7 +67,10 @@ export async function applyQuality(pc: RTCPeerConnection, settings: QualitySetti
     if (!params.encodings?.length) return;
     for (const encoding of params.encodings) {
       encoding.maxBitrate = (sender.track?.kind === 'video' ? settings.videoBitrate : settings.audioBitrate) * 1000;
-      if (sender.track?.kind === 'video') encoding.maxFramerate = settings.fps;
+      if (sender.track?.kind === 'video') {
+        encoding.maxFramerate = settings.fps;
+        encoding.scaleResolutionDownBy = 1;
+      }
     }
     if (sender.track?.kind === 'video') params.degradationPreference = 'maintain-resolution';
     try {

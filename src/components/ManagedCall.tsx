@@ -91,6 +91,10 @@ export default function ManagedCall({ roomId, onLeave }: { roomId: string; onLea
           if (!disposed && !ok) record('Часть параметров качества управляется браузером');
         });
       };
+      // Media may be added after ICE connects; apply again after each negotiation.
+      other.pc.addEventListener('signalingstatechange', () => {
+        if (other.pc.signalingState === 'stable') apply();
+      });
       other.on('state-change', ({ to }) => {
         if (disposed || selectedRef.current !== other) return;
         if (to === 'connected') { clearTimeout(negotiationDeadline); setStatus('На связи'); setError(''); record('Медиа подключены'); apply(); }
@@ -179,6 +183,7 @@ export default function ManagedCall({ roomId, onLeave }: { roomId: string; onLea
           stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: true });
         }
         if (disposed || peerRef.current !== peer) { stream.getTracks().forEach(t => t.stop()); return; }
+        stream.getVideoTracks().forEach(track => { track.contentHint = 'detail'; });
         streamRef.current = stream; setLocal(stream); setMuted(false); setVideoOff(false); setFront(true);
         peer.addStream(stream);
         record('Камера и микрофон подключены');
@@ -202,12 +207,14 @@ export default function ManagedCall({ roomId, onLeave }: { roomId: string; onLea
       running = true;
       try {
         const report = await pc.getStats(); const parts: string[] = [];
+        const camera = streamRef.current?.getVideoTracks()[0]?.getSettings();
+        if (camera) parts.push(`Камера: ${camera.width ?? '—'}×${camera.height ?? '—'} · ${Math.round(camera.frameRate ?? 0)} FPS`);
         report.forEach(item => {
           if ((item.type === 'inbound-rtp' || item.type === 'outbound-rtp') && (item.kind === 'video' || item.mediaType === 'video') && !item.isRemote) {
             const bytes = item.bytesSent ?? item.bytesReceived ?? 0; const last = previous.get(item.id);
             const rate = last && item.timestamp > last.time ? Math.max(0, (bytes - last.bytes) * 8 / (item.timestamp - last.time) / 1000).toFixed(1) : null;
             previous.set(item.id, { time: item.timestamp, bytes });
-            parts.push(`${item.type === 'inbound-rtp' ? 'Приём' : 'Отправка'}: ${item.frameWidth ?? '—'}×${item.frameHeight ?? '—'} · ${Math.round(item.framesPerSecond ?? 0)} FPS${rate ? ` · ${rate} Мбит/с` : ''}${item.qualityLimitationReason === 'bandwidth' ? ' · ограничено сетью' : ''}`);
+            parts.push(`${item.type === 'inbound-rtp' ? 'Приём' : 'Отправка'}: ${item.frameWidth ?? '—'}×${item.frameHeight ?? '—'} · ${Math.round(item.framesPerSecond ?? 0)} FPS${rate ? ` · ${rate} Мбит/с` : ''}${item.qualityLimitationReason === 'bandwidth' ? ' · ограничено сетью' : item.qualityLimitationReason === 'cpu' ? ' · ограничено устройством' : ''}`);
           }
           if (item.type === 'transport' && item.selectedCandidatePairId) {
             const pair = report.get(item.selectedCandidatePairId); const candidate = pair && report.get(pair.localCandidateId);
@@ -236,8 +243,8 @@ export default function ManagedCall({ roomId, onLeave }: { roomId: string; onLea
   const share = async () => {
     const link = new URL(invitation(roomId));
     const url = publicOrigin.current ? new URL(`${link.pathname}${link.search}`, publicOrigin.current).href : link.href;
-    try { if (navigator.share) await navigator.share({ title: 'Видеозвонок ClearCall', url }); else { await navigator.clipboard.writeText(url); setNotice('Ссылка скопирована. Отправьте её собеседнику.'); } }
-    catch (e) { if (!(e instanceof DOMException && e.name === 'AbortError')) setNotice(`Скопируйте ссылку: ${url}`); }
+    try { await navigator.clipboard.writeText(url); setNotice('Ссылка скопирована. Отправьте её собеседнику.'); }
+    catch { setNotice(`Скопируйте ссылку: ${url}`); }
   };
   const switchCamera = async () => {
     const stream = streamRef.current; const peer = peerRef.current;
@@ -250,7 +257,7 @@ export default function ManagedCall({ roomId, onLeave }: { roomId: string; onLea
       try { acquired = await navigator.mediaDevices.getUserMedia({ video: cameraConstraints(quality, !front), audio: false }); }
       catch { changed = false; acquired = await navigator.mediaDevices.getUserMedia({ video: cameraConstraints(quality, front), audio: false }); }
       if (generation !== epoch.current) { acquired.getTracks().forEach(t => t.stop()); return; }
-      const track = acquired.getVideoTracks()[0]; track.enabled = !videoOff;
+      const track = acquired.getVideoTracks()[0]; track.enabled = !videoOff; track.contentHint = 'detail';
       await peer.replaceTrack(old, track);
       if (generation !== epoch.current) { track.stop(); return; }
       stream.removeTrack(old); stream.addTrack(track); setLocal(new MediaStream(stream.getTracks()));
@@ -272,7 +279,7 @@ export default function ManagedCall({ roomId, onLeave }: { roomId: string; onLea
       {blocked && <button className="btn-primary mb-3" onClick={async () => {
         const results = await Promise.allSettled(Array.from(document.querySelectorAll('video'), v => v.play())); setBlocked(results.some(r => r.status === 'rejected'));
       }}>Включить видео и звук</button>}
-      {ready && <button className="btn-primary mb-4" onClick={share}>Отправить ссылку</button>}
+      {ready && <button className="btn-primary mb-4" onClick={share}>Скопировать ссылку</button>}
       <div className="flex justify-center gap-3">
         {local && <><button className={`btn-control ${muted ? 'active' : ''}`} aria-label={muted ? 'Включить микрофон' : 'Выключить микрофон'} aria-pressed={muted} onClick={() => { streamRef.current?.getAudioTracks().forEach(t => { t.enabled = muted; }); setMuted(!muted); }}>{muted ? '🔇' : '🎤'}</button><button className={`btn-control ${videoOff ? 'active' : ''}`} aria-label={videoOff ? 'Включить камеру' : 'Выключить камеру'} aria-pressed={videoOff} onClick={() => { streamRef.current?.getVideoTracks().forEach(t => { t.enabled = videoOff; }); setVideoOff(!videoOff); }}>📹</button><button className="btn-control" aria-label="Переключить камеру" disabled={switching} onClick={switchCamera}>🔄</button></>}
         <button className="btn-danger" aria-label="Завершить звонок" onClick={onLeave}>☎</button>

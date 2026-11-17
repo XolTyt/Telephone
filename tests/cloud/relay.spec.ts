@@ -8,7 +8,7 @@ for (const transport of transports) {
       await context.route('**/api/call-config', route => route.fulfill({ contentType:'application/json', body:JSON.stringify({apiKey:key,version:'cloud-test'}) }));
     }
     await context.addInitScript(() => {
-      Object.defineProperty(navigator, 'share', { configurable:true, value:async(data:ShareData) => { (window as unknown as {sharedUrl?:string}).sharedUrl=data.url; } });
+      Object.defineProperty(navigator, 'clipboard', { configurable:true, value:{writeText:async(url:string) => { (window as unknown as {sharedUrl?:string}).sharedUrl=url; }} });
       const Native = window.RTCPeerConnection;
       const connections: RTCPeerConnection[] = [];
       window.RTCPeerConnection = class extends Native {
@@ -19,14 +19,14 @@ for (const transport of transports) {
     const relay = transport === 'tls' ? 'tls' : '1';
     await page.goto(transport === 'direct' ? '/' : `/?relay=${relay}`);
     await page.getByRole('button',{name:'Создать звонок'}).click();
-    await expect(page.getByRole('button',{name:'Отправить ссылку'})).toBeVisible({timeout:30000});
-    await page.getByRole('button',{name:'Отправить ссылку'}).click();
+    await expect(page.getByRole('button',{name:'Скопировать ссылку'})).toBeVisible({timeout:30000});
+    await page.getByRole('button',{name:'Скопировать ссылку'}).click();
     const link=await page.evaluate(()=>(window as unknown as {sharedUrl:string}).sharedUrl);
     const guest=await context.newPage(); const guestUrl=new URL(link);
     if(transport!=='direct')guestUrl.searchParams.set('relay',relay);
     await guest.goto(guestUrl.href); await guest.getByRole('button',{name:'Войти в звонок'}).click();
     for (const phone of [page,guest]) {
-      await expect.poll(()=>phone.locator('.remote-video').evaluate((v:HTMLVideoElement)=>v.videoWidth),{timeout:45000}).toBeGreaterThan(0);
+      await expect.poll(()=>phone.locator('.remote-video').evaluate((v:HTMLVideoElement)=>v.videoWidth),{timeout:45000}).toBeGreaterThanOrEqual(1920);
       await expect.poll(()=>phone.evaluate(async()=>{
         let packets=0;
         for(const pc of (window as unknown as {testConnections:RTCPeerConnection[]}).testConnections) {

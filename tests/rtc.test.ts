@@ -25,11 +25,11 @@ describe('invitations', () => {
 
 describe('quality settings', () => {
   it('applies separate video and audio budgets and handles browser rejection', async () => {
-    const video = { track: { kind: 'video' }, getParameters: () => ({ encodings: [{}] }), setParameters: vi.fn().mockResolvedValue(undefined) };
+    const video = { track: { kind: 'video' }, getParameters: () => ({ encodings: [{ scaleResolutionDownBy: 2 }] }), setParameters: vi.fn().mockResolvedValue(undefined) };
     const audio = { track: { kind: 'audio' }, getParameters: () => ({ encodings: [{}] }), setParameters: vi.fn().mockRejectedValue(new Error('unsupported')) };
     const pc = { getSenders: () => [video, audio] } as unknown as RTCPeerConnection;
     expect(await applyQuality(pc, { resolution: '1080', fps: 30, videoBitrate: 8000, audioBitrate: 128 })).toBe(false);
-    expect(video.setParameters).toHaveBeenCalledWith({ encodings: [{ maxBitrate: 8000000, maxFramerate: 30 }], degradationPreference: 'maintain-resolution' });
+    expect(video.setParameters).toHaveBeenCalledWith({ encodings: [{ maxBitrate: 8000000, maxFramerate: 30, scaleResolutionDownBy: 1 }], degradationPreference: 'maintain-resolution' });
     expect(audio.setParameters).toHaveBeenCalledWith({ encodings: [{ maxBitrate: 128000 }] });
   });
   it('does not invent an unnegotiated encoding', async () => {
@@ -41,7 +41,7 @@ describe('quality settings', () => {
     const setParameters = vi.fn().mockRejectedValueOnce(new Error('unsupported preference')).mockResolvedValueOnce(undefined);
     const pc = { getSenders: () => [{ track: { kind: 'video' }, getParameters: () => ({ encodings: [{}] }), setParameters }] } as unknown as RTCPeerConnection;
     expect(await applyQuality(pc, { resolution: '1080', fps: 30, videoBitrate: 8000, audioBitrate: 128 })).toBe(true);
-    expect(setParameters).toHaveBeenLastCalledWith({ encodings: [{ maxBitrate: 8000000, maxFramerate: 30 }] });
+    expect(setParameters).toHaveBeenLastCalledWith({ encodings: [{ maxBitrate: 8000000, maxFramerate: 30, scaleResolutionDownBy: 1 }] });
   });
 });
 

@@ -4,22 +4,22 @@ test('one-link managed SDK call exchanges real media, survives signaling drop an
   test.setTimeout(90000);
   const errors: string[] = []; context.on('page', p => p.on('pageerror', e => errors.push(e.message)));
   await context.addInitScript(() => {
-    Object.defineProperty(navigator, 'share', { configurable: true, value: async (data: ShareData) => {
-      (window as unknown as { sharedUrl?: string }).sharedUrl = data.url;
-    } });
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: {writeText: async (url: string) => {
+      (window as unknown as { sharedUrl?: string }).sharedUrl = url;
+    }} });
   });
   await context.route('**/api/call-config', route => route.fulfill({ contentType:'application/json', body:JSON.stringify({ apiKey:'pk_live_clearcall_test', version:'e2e' }) }));
   await page.goto('/');
   await expect(page.getByRole('button', { name:'Создать звонок' })).toBeVisible();
   await page.getByRole('button', { name:'Создать звонок' }).click();
   await expect(page.getByRole('heading', { name:'Ждём собеседника' })).toBeVisible();
-  await page.getByRole('button', { name:'Отправить ссылку' }).click();
+  await page.getByRole('button', { name:'Скопировать ссылку' }).click();
   const url = await page.evaluate(() => (window as unknown as { sharedUrl: string }).sharedUrl);
   expect(new URL(url).searchParams.get('room')).toMatch(/^[A-HJ-NP-Z2-9]{24}$/);
   const guest = await context.newPage(); await guest.goto(url);
   await guest.getByRole('button', { name:'Войти в звонок' }).click();
   for (const phone of [page, guest]) {
-    await expect.poll(() => phone.locator('.remote-video').evaluate((v:HTMLVideoElement) => v.videoWidth), {timeout:20000}).toBeGreaterThan(0);
+    await expect.poll(() => phone.locator('.remote-video').evaluate((v:HTMLVideoElement) => v.videoWidth), {timeout:20000}).toBeGreaterThanOrEqual(1920);
     expect(await phone.locator('.remote-video').evaluate((v:HTMLVideoElement) => (v.srcObject as MediaStream).getAudioTracks().some(t => t.readyState === 'live'))).toBe(true);
   }
   await page.getByRole('button', { name:'Выключить микрофон' }).click();
