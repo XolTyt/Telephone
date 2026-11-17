@@ -1,0 +1,12 @@
+node_modules/
+.next/
+dist/
+build/
+*.log
+.tools/
+.env
+.env.*
+!.env.example
+test-results/
+playwright-report/
+tests/artifacts/
